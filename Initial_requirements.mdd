@@ -1,0 +1,594 @@
+# MRRPulse — Product Requirements Document (PRD) + Technical Requirements
+**Version:** 1.0  
+**Date:** 2026-01-01  
+**Owner:** Murali Makkena (Product)  
+**Stack:** Python (FastAPI), Next.js (frontend), PostgreSQL, Stripe Connect, Webhooks, Background Workers
+
+---
+
+## 1) Executive Summary
+
+**MRRPulse** is a Stripe-first alerting and early-warning system for SaaS founders and merchants doing **$20k+/month**. It delivers **real-time alerts**, **risk monitoring**, and **team-ready notifications** (Slack/Discord), plus a **Churn Preventer** that escalates high-value failed payments to **SMS/WhatsApp** for fast recovery.
+
+MRRPulse is intentionally **not** a full analytics dashboard like Baremetrics/ChartMogul. It is:
+- an **alerts product**
+- an **insurance policy for revenue**
+- a **shared visibility bot** for teams without giving everyone Stripe Dashboard access
+
+---
+
+## 2) Goals, Non-Goals
+
+### 2.1 Goals
+1. Provide **real-time, actionable alerts** for Stripe events impacting revenue, churn, disputes, and payouts.
+2. Provide an **Early Warning System** to reduce risk of Stripe review/freezes (dispute rate, velocity spikes, payout delays).
+3. Provide a **Shared Success Bot** for Slack/Discord that routes the right info to the right teams/channels.
+4. Provide a **Churn Preventer**: escalate high-value failed payments to **SMS/WhatsApp**, enabling immediate outreach.
+5. Enable setup in **< 5 minutes** (connect Stripe, choose alerts, connect Slack/Discord, set escalation).
+6. Support **multi-user teams** and **multi-Stripe accounts** (e.g., agencies / multiple brands) as a paid tier.
+
+### 2.2 Non-Goals (MVP)
+- Full financial reporting suite (ARR cohorts, LTV modeling, etc.)
+- Accounting / invoicing / tax tools
+- Automated write actions in Stripe (refunds, subscription edits) in MVP
+- Deep fraud scoring beyond Stripe Radar (we monitor, we don’t replace Radar)
+
+---
+
+## 3) Target Users & Personas
+
+### 3.1 Primary
+- **SaaS founders** doing $20k–$500k/mo
+- **E-commerce stores** doing $20k+/mo on Stripe
+- **High-ticket B2B SaaS / coaches** with payments $100+ per invoice
+
+### 3.2 Secondary
+- Agencies managing multiple Stripe accounts (multi-tenant)
+- Support/Sales/Marketing teams needing visibility without Stripe admin access
+
+---
+
+## 4) Core Value Proposition
+
+### 4.1 “Insurance for your revenue stream”
+Stripe freezes/reviews are existential. MRRPulse monitors danger zones and warns early.
+
+### 4.2 “Shared visibility without risk”
+Teams get the right alerts in Slack/Discord channels without exposing the full Stripe dashboard.
+
+### 4.3 “Recover revenue in minutes”
+High-value failed payments go to SMS/WhatsApp so founders can personally rescue churn.
+
+---
+
+## 5) Product Modules & Features
+
+### Module A — Stripe Connection & Account Management
+**Objective:** Securely connect Stripe accounts and subscribe to relevant events.
+
+**Requirements**
+- Users authenticate (email/password + optional Google OAuth).
+- Connect Stripe via **Stripe Connect Standard OAuth**.
+- Persist:
+  - `stripe_account_id` (acct_*)
+  - encrypted `access_token` and `refresh_token` (if applicable per Connect flow)
+  - account metadata (business name, default currency, country)
+- Support multiple Stripe accounts per workspace (paid tier).
+
+**Acceptance Criteria**
+- Connect flow completes successfully in < 5 minutes.
+- Stripe account displays “Connected” and event ingestion begins.
+
+---
+
+### Module B — Real-time Event Ingestion (Webhooks)
+**Objective:** Ingest Stripe events reliably and process them into alerts + metrics.
+
+**Stripe Events (MVP)**
+- Payments & invoices:
+  - `invoice.paid`
+  - `invoice.payment_failed`
+  - `payment_intent.succeeded`
+  - `payment_intent.payment_failed`
+  - `charge.succeeded`
+  - `charge.failed`
+  - `charge.refunded`
+- Subscriptions:
+  - `customer.subscription.created`
+  - `customer.subscription.updated`
+  - `customer.subscription.deleted`
+- Disputes:
+  - `charge.dispute.created`
+  - `charge.dispute.updated`
+  - `charge.dispute.closed`
+- Payouts:
+  - `payout.paid`
+  - `payout.failed`
+  - `payout.canceled`
+  - `balance.available` (optional, for payout timing signals)
+
+**Reliability Requirements**
+- Idempotent processing by `event.id`.
+- Store raw event payload (or hashed subset) and normalized fields.
+- Retry mechanism with backoff for downstream notification failures.
+- DLQ (dead-letter queue) for events that repeatedly fail.
+
+**Acceptance Criteria**
+- P95 webhook processing < 10 seconds (event → alert delivery).
+- No double alerts for same Stripe event.
+
+---
+
+### Module C — Alerting Engine (Rules + Baselines)
+**Objective:** Convert events + aggregates into actionable alerts.
+
+#### C1. Rule-based Alerts (MVP)
+- **Revenue Drop/Spike** (daily/hourly)
+  - Trigger when `revenue_today` deviates by configurable percent vs baseline (7-day, 30-day)
+- **Refund Spike**
+  - Trigger when refunds count/amount exceed threshold within a time window (e.g., 5 refunds / 10 minutes)
+- **Dispute Created / Dispute Rate Rising**
+- **Subscription Cancellation**
+  - Trigger on cancel/downgrade; optionally only for high MRR customers
+- **Payment Failed**
+  - Trigger on `invoice.payment_failed` or `payment_intent.payment_failed`
+- **Payout Delayed/Failed**
+  - Trigger on payout failed/canceled or abnormal payout schedule deviation (best-effort in MVP)
+
+#### C2. Baselines (MVP)
+- Rolling aggregates stored per Stripe account:
+  - revenue hourly/daily
+  - refunds hourly/daily
+  - disputes count rolling 7/30 days
+  - payment failures rolling windows
+  - cancellations rolling windows
+- Baseline computation:
+  - simple rolling mean + standard deviation
+  - z-score threshold default = 2.0 (configurable)
+
+**Acceptance Criteria**
+- User can configure thresholds per alert type.
+- Alerts are sent to selected channels (Slack/Discord/email/SMS).
+
+---
+
+## 6) New Requirements: Premium Differentiators
+
+### 6.1 The “Early Warning System” (Risk Management)
+**Objective:** Warn users before Stripe flags their account (dispute rate, velocity spikes, payout anomalies).
+
+#### Danger Zone Metrics (MVP)
+1. **Dispute Rate Monitor**
+   - Monitor dispute rate as:
+     - `disputes_last_30_days / successful_charges_last_30_days`
+   - Configurable warning thresholds:
+     - Warning at 0.6%
+     - High risk at 0.8%
+     - Critical at 1.0% (Stripe’s commonly cited danger zone)
+   - Alert example:
+     - “⚠️ Dispute rate hit **0.8%** (last 30d). One more may trigger a review. Investigate recent charges.”
+
+2. **Velocity Spike Monitor**
+   - Detect sudden changes in:
+     - charge volume per hour/day
+     - refund velocity
+     - dispute velocity
+   - Alert example:
+     - “🚨 Velocity spike: **3x** normal charge volume in last 30 minutes. Confirm no pricing bug or fraud.”
+
+3. **Refund Spike Monitor (Enhanced)**
+   - Burst threshold rule: N refunds in M minutes
+   - Rate threshold rule: refund rate vs baseline
+   - Alert example:
+     - “⚠️ 5 refunds in 10 minutes. Possible bug in latest release or bad campaign traffic.”
+
+4. **Payout Delays / Failures**
+   - Alert on:
+     - `payout.failed`, `payout.canceled`
+     - optional best-effort “expected payout not seen by X hours after usual time” (requires learning payout cadence)
+   - Alert example:
+     - “🚨 Payout failed. Check bank account / Stripe payout settings.”
+
+**Target Segment**
+- SaaS + e-commerce doing $20k+/month.
+
+**Value**
+- “Insurance” for primary revenue stream.
+
+**Acceptance Criteria**
+- User sees “Risk Status” badge: Normal / Warning / Danger.
+- Risk alerts are high priority and can trigger escalation channels.
+
+---
+
+### 6.2 The “Shared Success” Bot (Slack/Discord for Teams)
+**Objective:** Highly customizable bot that routes Stripe insights to specific team channels.
+
+#### Channels & Routing
+- Slack:
+  - incoming webhook (MVP)
+  - optional Slack app (Phase 2) for richer interactivity
+- Discord:
+  - bot token + channel mapping
+
+#### Team-based Alert Templates
+1. **Sales Channel**
+   - New high-value customer / high MRR subscription
+   - Example:
+     - “🎉 New high-value customer: **{customer_name}** subscribed to **{plan_name}** (${amount}/mo). Click to send welcome email.”
+   - Requirements:
+     - Provide “action links”:
+       - open Stripe customer page
+       - open email template link (MRRPulse UI)
+
+2. **Support Channel**
+   - Payment failed for upgrade, trial conversion failed, repeated failures
+   - Example:
+     - “⚠️ Payment failed: **{customer}** tried to upgrade; card declined. Reach out now?”
+   - Requirements:
+     - Include last error code, retries, and MRR at risk.
+
+3. **Marketing Channel**
+   - Milestones:
+     - MRR milestone reached (e.g., $10k, $50k, $100k)
+     - revenue record day/week
+   - Example:
+     - “🏆 Milestone: You hit **$50k MRR**! Generate a celebratory image for Twitter?”
+   - Requirements:
+     - Create a “milestone card” in MRRPulse UI for easy sharing (image generation integration optional Phase 2)
+
+**Security**
+- Team members do not need Stripe access; they only receive curated info.
+- Sensitive fields configuration (e.g., hide email/name, show masked IDs).
+
+**Acceptance Criteria**
+- Workspace admin can map alert types → channels.
+- Templates can be customized (variables + conditional blocks).
+
+---
+
+### 6.3 The “Churn Preventer”
+**Objective:** Escalate high-value failed payments to SMS/WhatsApp with one-tap outreach.
+
+#### Workflow (MVP)
+- Trigger: `invoice.payment_failed` (or `payment_intent.payment_failed`)
+- Condition: failed amount >= configurable threshold (default **$100**)
+- Action:
+  1. Send SMS to founder/on-call number:
+     - “🚨 Payment Failed: ${amount} for {customer}. Tap to message on WhatsApp.”
+  2. Provide link/button:
+     - WhatsApp deep link (if phone exists) or fallback to email template
+  3. Optional: include suggested message template
+
+#### Channels
+- SMS: Twilio (MVP)
+- WhatsApp: Twilio WhatsApp or Meta WhatsApp Cloud API (Phase 2 choice)
+
+#### Requirements
+- Per-account escalation roster:
+  - Primary on-call phone(s)
+  - Quiet hours + escalation windows
+- Dedupe:
+  - Do not spam SMS repeatedly for the same invoice failure.
+  - Repeat policy: one immediate, one after X minutes if not resolved.
+
+**Target Segment**
+- High-ticket coaches, consultants, B2B SaaS.
+
+**Value**
+- Recovering one payment/month pays for the tool.
+
+**Acceptance Criteria**
+- Founder receives SMS within 60 seconds of Stripe failure event.
+- One-tap WhatsApp link works when phone number exists.
+
+---
+
+## 7) User Experience Requirements
+
+### 7.1 Onboarding Flow
+1. Sign up / login
+2. Create workspace
+3. Connect Stripe (Connect OAuth)
+4. Choose “Alert Packs” (presets):
+   - Founder Pack (revenue, churn, disputes)
+   - Risk Pack (danger zone metrics)
+   - Team Pack (Slack/Discord routing)
+5. Connect Slack/Discord
+6. Configure Churn Preventer (phone number, threshold, quiet hours)
+7. Confirm test alert
+
+**Success:** user gets a test alert in Slack + email.
+
+---
+
+## 8) Roles & Permissions (RBAC)
+
+### Workspace Roles
+- **Owner**: billing, integrations, risk thresholds, all settings
+- **Admin**: manage integrations + alert rules
+- **Member**: view alerts/history/dashboard (no billing)
+- **Viewer**: read-only dashboards and alert history
+
+### Stripe Accounts
+- Each Stripe account belongs to one workspace.
+- Multi-account per workspace supported in Pro tier.
+
+---
+
+## 9) Data Model (High-Level)
+
+### Core Tables (PostgreSQL)
+- `users`
+- `workspaces`
+- `workspace_members`
+- `stripe_accounts`
+  - `workspace_id`
+  - `stripe_account_id`
+  - `access_token_enc`, `refresh_token_enc`
+  - `currency`, `country`, `business_name`
+  - `status` (connected/disconnected)
+- `stripe_events`
+  - `stripe_event_id` (unique)
+  - `stripe_account_id`
+  - `type`
+  - `created_at`
+  - `payload_json` (optional, or minimal normalized subset)
+  - `processed_at`, `status`
+- `metrics_hourly`, `metrics_daily`
+  - revenue, refunds, disputes, failures, cancellations
+- `alert_rules`
+  - type, thresholds, windows, enabled
+- `alerts`
+  - alert_type, severity, title, body, metadata, status (sent/failed)
+- `notification_channels`
+  - slack webhook, discord channel, email preferences, sms settings
+- `alert_deliveries`
+  - alert_id, channel_id, delivered_at, status, error
+- `risk_state`
+  - dispute_rate_30d, velocity_score, refund_burst_score, payout_health
+- `audit_log`
+
+---
+
+## 10) External Integrations
+
+### Stripe
+- Connect OAuth
+- Webhooks
+- Optional periodic polling jobs for aggregates and payout cadence
+
+### Slack
+- Incoming webhooks (MVP)
+- Slack app (Phase 2) for interactive buttons, user mapping
+
+### Discord
+- Bot + channel mapping (MVP)
+
+### SMS / WhatsApp
+- Twilio SMS (MVP)
+- Twilio WhatsApp or Meta WhatsApp Cloud API (Phase 2)
+
+---
+
+## 11) API Requirements (FastAPI)
+
+### 11.1 Auth & Workspace
+- `POST /api/auth/signup`
+- `POST /api/auth/login`
+- `POST /api/workspaces`
+- `GET /api/workspaces/{id}`
+- `POST /api/workspaces/{id}/members`
+
+### 11.2 Stripe Connect
+- `GET /api/stripe/connect/start` → redirects to Stripe OAuth
+- `GET /api/stripe/connect/callback` → handles code exchange
+- `GET /api/stripe/accounts` → list connected accounts
+- `POST /api/stripe/accounts/{id}/disconnect`
+
+### 11.3 Webhooks
+- `POST /api/webhooks/stripe`  
+  - verify signature
+  - enqueue event for processing
+  - return 2xx quickly
+
+### 11.4 Alerts & Rules
+- `GET /api/alerts?filters=...`
+- `GET /api/alerts/{id}`
+- `POST /api/rules`
+- `PUT /api/rules/{id}`
+- `POST /api/test-alert`
+
+### 11.5 Notification Channels
+- `POST /api/integrations/slack`
+- `POST /api/integrations/discord`
+- `POST /api/integrations/sms`
+- `POST /api/integrations/whatsapp` (phase 2)
+
+### 11.6 Risk Dashboard
+- `GET /api/risk/status`
+- `GET /api/risk/history`
+
+---
+
+## 12) Background Processing Requirements
+
+### Components
+- Webhook receiver (FastAPI)
+- Queue (Redis + RQ/Celery or equivalent)
+- Workers:
+  - `event_processor`
+  - `metric_aggregator` (hourly/daily)
+  - `risk_evaluator` (danger zone metrics)
+  - `notifier` (Slack/Discord/email/SMS)
+  - `digest_sender` (daily summary)
+
+### SLA
+- Event-to-alert P95: < 60 seconds (SMS/S lack), < 2 minutes (email)
+- Aggregates updated at least hourly (MVP)
+
+---
+
+## 13) Frontend Requirements (Next.js)
+
+### Pages
+- `/login`, `/signup`
+- `/onboarding`
+- `/dashboard`
+  - Today summary, latest alerts, risk badge
+- `/alerts`
+  - filters, search, severity, account selection
+- `/rules`
+  - alert rules, thresholds, presets
+- `/integrations`
+  - Slack/Discord/SMS setup
+- `/risk`
+  - dispute rate, velocity, refund spikes, payout health
+- `/billing`
+  - plan + Stripe customer portal
+- `/settings`
+  - workspace, members, roles
+
+### UI Requirements
+- Clean minimal design (alerts-first)
+- “Test alert” button per integration
+- “Silence alerts” / quiet hours controls
+- “Templates” editor for Slack/Discord messages
+
+---
+
+## 14) Notification Formatting Requirements
+
+### Slack/Discord Message Structure
+- Title + severity icon
+- Key facts in bullets
+- Action links:
+  - Stripe customer URL
+  - Stripe invoice/charge URL
+  - MRRPulse internal “investigate” URL
+- Optional mention:
+  - `@channel` for critical alerts (configurable)
+
+### SMS Template Constraints
+- Must fit within standard SMS lengths
+- Include short link to MRRPulse alert details
+- WhatsApp deep link if phone exists
+
+---
+
+## 15) Pricing & Packaging (Suggested)
+
+### Starter ($19/mo)
+- 1 Stripe account
+- Slack + Email alerts
+- Basic risk alerts (dispute rate + refund spike + payout failed)
+- Alert history (30 days)
+- Daily digest
+
+### Pro ($49/mo)
+- Up to 3 Stripe accounts
+- Slack + Discord + Email
+- Early Warning System full pack (velocity, payout cadence)
+- Churn Preventer (SMS) for high-value failures
+- Alert history 180 days
+
+### Team ($99/mo)
+- 10+ members
+- Multi-channel routing by team
+- Advanced templates
+- Multiple on-call rotations
+- Agency-style workspace controls
+
+(Exact pricing can be finalized later; requirements assume tier-gated features.)
+
+---
+
+## 16) Security, Privacy, Compliance
+
+### Security
+- Verify Stripe webhook signatures.
+- Encrypt sensitive tokens at rest (KMS/Secrets Manager).
+- Principle of least privilege: request read-only access.
+- RBAC for workspace access.
+- Rate-limiting on API endpoints.
+- Audit logs for integration changes and rule changes.
+
+### Data Minimization
+- Store minimal customer PII:
+  - Prefer Stripe customer ID over full email/name; optionally store masked email for display.
+- Never store payment method details (PCI scope avoided).
+
+### Operational
+- Alert deduplication and anti-spam controls.
+- “Quiet hours” and throttle limits per channel.
+
+---
+
+## 17) Observability & Reliability
+
+### Logging
+- Structured logs with correlation IDs:
+  - stripe_event_id
+  - workspace_id
+  - stripe_account_id
+  - alert_id
+
+### Metrics
+- Event ingestion rate
+- Processing lag
+- Delivery success rate by channel
+- Worker retries & DLQ count
+- False positive feedback (phase 2)
+
+### Alerts (internal)
+- On webhook signature failures
+- On queue backlog growth
+- On notification provider failures (Slack/Twilio)
+
+---
+
+## 18) MVP Milestones (Suggested Execution)
+
+### Milestone 1 — Core Platform (Week 1–2)
+- Auth + workspaces
+- Stripe Connect + webhook ingestion
+- Alert rules (payment failed, refunds, disputes)
+- Slack + Email notifications
+- Alerts UI + history
+
+### Milestone 2 — Risk Pack (Week 3)
+- Dispute rate calculation + thresholds
+- Refund burst detection
+- Velocity spikes (simple baseline)
+- Payout failed notifications
+
+### Milestone 3 — Team Pack + Churn Preventer (Week 4)
+- Channel routing for Slack/Discord
+- Template editor v1
+- SMS escalation for high-value payment failures
+- Quiet hours + throttle
+
+---
+
+## 19) Acceptance Criteria (Definition of Done)
+
+**MVP is “Done” when:**
+1. User connects Stripe and receives real alerts (Slack/email) within 60 seconds for test events.
+2. Early Warning System shows dispute rate and triggers threshold alerts.
+3. Shared Success Bot can route:
+   - Sales alerts to sales channel
+   - Support alerts to support channel
+   - Marketing milestones to marketing channel
+4. Churn Preventer sends SMS for failed payments >= $100 with dedupe and link-out.
+5. Alert history and configuration UI works reliably across multiple users.
+
+---
+
+## 20) Open Questions (Record, Don’t Block MVP)
+- Best method to infer “payout delayed” beyond explicit failed events (cadence learning vs polling).
+- WhatsApp provider choice (Twilio vs Meta Cloud API).
+- How much customer PII to display in Slack (configurable privacy levels).
+- Whether to support “agency multi-workspace” in MVP or Phase 2.
+- Whether to add optional “auto-create support ticket” integrations (Zendesk/Intercom) in Phase 2.
+
+---
