@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+*.manifest
+*.spec
+
+# Node
+node_modules/
+.next/
+out/
+.npm
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# Database
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# AWS
+.aws-sam/
+samconfig.toml
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Misc
+*.bak
+*.tmp
