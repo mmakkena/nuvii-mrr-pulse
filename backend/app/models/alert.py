@@ -56,6 +56,8 @@ class AlertRule(Base):
         UUID(as_uuid=True), ForeignKey("stripe_accounts.id"), nullable=True
     )
     rule_type: Mapped[AlertType] = mapped_column(SQLEnum(AlertType), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     thresholds_json: Mapped[dict] = mapped_column(JSONB, default=dict)
     channels_json: Mapped[list] = mapped_column(JSONB, default=list)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

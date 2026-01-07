@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { formatCurrency, formatRelativeTime } from '@/lib/utils'
 import { alertsApi, riskApi, dashboardApi, Alert, RiskStatus, DashboardStats } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import Link from 'next/link'
 
 function getSeverityColor(severity: string) {
@@ -55,6 +56,7 @@ function getRiskBorderColor(status: string) {
 }
 
 export default function DashboardPage() {
+  const { isLoading: authLoading, token } = useAuth()
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [riskStatus, setRiskStatus] = useState<RiskStatus | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -62,6 +64,9 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // Don't fetch if still checking auth or not authenticated
+    if (authLoading || !token) return
+
     async function fetchData() {
       try {
         setLoading(true)
@@ -80,7 +85,16 @@ export default function DashboardPage() {
       }
     }
     fetchData()
-  }, [])
+  }, [authLoading, token])
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      </div>
+    )
+  }
 
   const handleSendTestAlert = async () => {
     try {

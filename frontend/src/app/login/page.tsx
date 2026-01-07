@@ -2,31 +2,43 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { useAuth } from '@/lib/auth'
 
 export default function LoginPage() {
-  const router = useRouter()
+  const { login, isLoading: authLoading } = useAuth()
   const [isLoading, setIsLoading] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
+    setError(null)
 
-    // TODO: Implement actual login
-    setTimeout(() => {
+    try {
+      await login(email, password)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed. Please check your credentials.')
+    } finally {
       setIsLoading(false)
-      router.push('/dashboard')
-    }, 1000)
+    }
   }
 
   const handleGoogleLogin = () => {
     // TODO: Implement Google OAuth
     console.log('Google login')
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      </div>
+    )
   }
 
   return (
@@ -42,6 +54,11 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {error && (
+            <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+              {error}
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <label htmlFor="email" className="text-sm font-medium">

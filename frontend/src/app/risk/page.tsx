@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { formatRelativeTime } from '@/lib/utils'
 import { riskApi, RiskStatus, RiskEvent } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 
 function getRiskStatusConfig(status: string) {
   switch (status) {
@@ -59,12 +60,15 @@ function getProgressColor(value: number, warning: number, critical: number) {
 }
 
 export default function RiskPage() {
+  const { isLoading: authLoading, token } = useAuth()
   const [riskStatus, setRiskStatus] = useState<RiskStatus | null>(null)
   const [riskEvents, setRiskEvents] = useState<RiskEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (authLoading || !token) return
+
     async function fetchRiskData() {
       try {
         setLoading(true)
@@ -81,9 +85,9 @@ export default function RiskPage() {
       }
     }
     fetchRiskData()
-  }, [])
+  }, [authLoading, token])
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <DashboardLayout>
         <Header

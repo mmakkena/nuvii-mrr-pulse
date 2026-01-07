@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { DashboardLayout, Header } from '@/components/layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,29 +10,17 @@ import {
   ExternalLink,
   Download,
   Calendar,
-  Zap,
+  Loader2,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
-
-// Mock data
-const currentPlan = {
-  name: 'Pro',
-  price: 4900,
-  interval: 'month',
-  features: [
-    'Up to 3 Stripe accounts',
-    'Slack + Discord + Email alerts',
-    'Early Warning System',
-    'Churn Preventer (SMS)',
-    '180-day alert history',
-    'Priority support',
-  ],
-}
+import { billingApi } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 
 const plans = [
   {
     id: 'starter',
     name: 'Starter',
+    priceId: 'price_starter',
     price: 1900,
     interval: 'month',
     description: 'Perfect for solo founders',
@@ -42,11 +31,11 @@ const plans = [
       '30-day alert history',
       'Daily digest',
     ],
-    current: false,
   },
   {
     id: 'pro',
     name: 'Pro',
+    priceId: 'price_pro',
     price: 4900,
     interval: 'month',
     description: 'For growing businesses',
@@ -58,12 +47,12 @@ const plans = [
       '180-day alert history',
       'Priority support',
     ],
-    current: true,
     popular: true,
   },
   {
     id: 'team',
     name: 'Team',
+    priceId: 'price_team',
     price: 9900,
     interval: 'month',
     description: 'For teams and agencies',
@@ -75,42 +64,89 @@ const plans = [
       'Multiple on-call rotations',
       'Dedicated support',
     ],
-    current: false,
   },
 ]
 
-const invoices = [
-  {
-    id: 'inv_123',
-    date: '2024-01-01',
-    amount: 4900,
-    status: 'paid',
-    period: 'Jan 2024',
-  },
-  {
-    id: 'inv_122',
-    date: '2023-12-01',
-    amount: 4900,
-    status: 'paid',
-    period: 'Dec 2023',
-  },
-  {
-    id: 'inv_121',
-    date: '2023-11-01',
-    amount: 4900,
-    status: 'paid',
-    period: 'Nov 2023',
-  },
-  {
-    id: 'inv_120',
-    date: '2023-10-01',
-    amount: 4900,
-    status: 'paid',
-    period: 'Oct 2023',
-  },
-]
+interface Subscription {
+  plan: string
+  status: string
+  current_period_end: string
+  cancel_at_period_end: boolean
+}
 
 export default function BillingPage() {
+  const { token, isLoading: authLoading } = useAuth()
+  const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [upgrading, setUpgrading] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (authLoading || !token) return
+
+    async function fetchSubscription() {
+      try {
+        setLoading(true)
+        const data = await billingApi.getSubscription(token!) as Subscription
+        setSubscription(data)
+      } catch (err) {
+        // If no subscription, that's ok - show free tier
+        setSubscription({ plan: 'free', status: 'active', current_period_end: '', cancel_at_period_end: false })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchSubscription()
+  }, [authLoading, token])
+
+  const handleManageInStripe = async () => {
+    if (!token) return
+    try {
+      const { portal_url } = await billingApi.getPortalUrl(token)
+      window.open(portal_url, '_blank')
+    } catch (err) {
+      alert('Unable to open billing portal. Please try again.')
+    }
+  }
+
+  const handleUpgrade = async (priceId: string) => {
+    if (!token) return
+    setUpgrading(priceId)
+    try {
+      const { checkout_url } = await billingApi.createCheckout(token, priceId)
+      window.location.href = checkout_url
+    } catch (err) {
+      alert('Unable to start checkout. Please try again.')
+    } finally {
+      setUpgrading(null)
+    }
+  }
+
+  const getCurrentPlan = () => {
+    if (!subscription) return null
+    return plans.find(p => p.id === subscription.plan) || {
+      id: 'free',
+      name: 'Free',
+      price: 0,
+      interval: 'month',
+      features: ['1 Stripe account', 'Email alerts only', '7-day alert history'],
+    }
+  }
+
+  if (authLoading || loading) {
+    return (
+      <DashboardLayout>
+        <Header title="Billing" description="Manage your subscription and billing" />
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  const currentPlan = getCurrentPlan()
+  const isCurrentPlan = (planId: string) => subscription?.plan === planId
+
   return (
     <DashboardLayout>
       <Header title="Billing" description="Manage your subscription and billing" />
@@ -123,10 +159,10 @@ export default function BillingPage() {
               <div>
                 <CardTitle>Current Plan</CardTitle>
                 <CardDescription>
-                  You are currently on the {currentPlan.name} plan
+                  You are currently on the {currentPlan?.name || 'Free'} plan
                 </CardDescription>
               </div>
-              <Button variant="outline">
+              <Button variant="outline" onClick={handleManageInStripe}>
                 <ExternalLink className="w-4 h-4 mr-2" />
                 Manage in Stripe
               </Button>
@@ -135,30 +171,34 @@ export default function BillingPage() {
           <CardContent>
             <div className="flex items-baseline gap-2 mb-6">
               <span className="text-4xl font-bold text-slate-900">
-                {formatCurrency(currentPlan.price)}
+                {formatCurrency(currentPlan?.price || 0)}
               </span>
-              <span className="text-slate-500">/{currentPlan.interval}</span>
+              <span className="text-slate-500">/{currentPlan?.interval || 'month'}</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {currentPlan.features.map((feature) => (
+              {currentPlan?.features.map((feature: string) => (
                 <div key={feature} className="flex items-center gap-2">
                   <Check className="w-5 h-5 text-green-500" />
                   <span className="text-slate-600">{feature}</span>
                 </div>
               ))}
             </div>
-            <div className="mt-6 pt-6 border-t flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-slate-500">
-                <Calendar className="w-4 h-4" />
-                Next billing date: February 1, 2024
+            {subscription?.current_period_end && (
+              <div className="mt-6 pt-6 border-t flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                  <Calendar className="w-4 h-4" />
+                  Next billing date: {new Date(subscription.current_period_end).toLocaleDateString()}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={handleManageInStripe}>
+                    Change Plan
+                  </Button>
+                  <Button variant="outline" className="text-red-600" onClick={handleManageInStripe}>
+                    Cancel Subscription
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline">Change Plan</Button>
-                <Button variant="outline" className="text-red-600">
-                  Cancel Subscription
-                </Button>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
 
@@ -172,7 +212,7 @@ export default function BillingPage() {
               <Card
                 key={plan.id}
                 className={`relative ${
-                  plan.current ? 'ring-2 ring-blue-500' : ''
+                  isCurrentPlan(plan.id) ? 'ring-2 ring-blue-500' : ''
                 }`}
               >
                 {plan.popular && (
@@ -206,10 +246,15 @@ export default function BillingPage() {
                   </ul>
                   <Button
                     className="w-full"
-                    variant={plan.current ? 'outline' : 'default'}
-                    disabled={plan.current}
+                    variant={isCurrentPlan(plan.id) ? 'outline' : 'default'}
+                    disabled={isCurrentPlan(plan.id) || upgrading === plan.priceId}
+                    onClick={() => handleUpgrade(plan.priceId)}
                   >
-                    {plan.current ? 'Current Plan' : 'Upgrade'}
+                    {isCurrentPlan(plan.id)
+                      ? 'Current Plan'
+                      : upgrading === plan.priceId
+                        ? 'Redirecting...'
+                        : 'Upgrade'}
                   </Button>
                 </CardContent>
               </Card>
@@ -233,12 +278,12 @@ export default function BillingPage() {
                 </div>
                 <div>
                   <p className="font-medium text-slate-900">
-                    Visa ending in 4242
+                    Payment method on file
                   </p>
-                  <p className="text-sm text-slate-500">Expires 12/2025</p>
+                  <p className="text-sm text-slate-500">Managed via Stripe</p>
                 </div>
               </div>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={handleManageInStripe}>
                 Update
               </Button>
             </div>
@@ -255,43 +300,19 @@ export default function BillingPage() {
                   Download invoices for your records
                 </CardDescription>
               </div>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={handleManageInStripe}>
                 <Download className="w-4 h-4 mr-2" />
-                Download All
+                View in Stripe
               </Button>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
-              {invoices.map((invoice) => (
-                <div
-                  key={invoice.id}
-                  className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-lg"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="text-sm">
-                      <p className="font-medium text-slate-900">
-                        {invoice.period}
-                      </p>
-                      <p className="text-slate-500">
-                        {new Date(invoice.date).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="font-medium text-slate-900">
-                      {formatCurrency(invoice.amount)}
-                    </span>
-                    <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full capitalize">
-                      {invoice.status}
-                    </span>
-                    <Button variant="ghost" size="sm">
-                      <Download className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <p className="text-sm text-slate-500 text-center py-4">
+              View and download all invoices in the Stripe billing portal.
+            </p>
+            <Button variant="outline" className="w-full" onClick={handleManageInStripe}>
+              Open Billing Portal
+            </Button>
           </CardContent>
         </Card>
 
@@ -308,36 +329,24 @@ export default function BillingPage() {
               <div>
                 <div className="flex justify-between text-sm mb-1">
                   <span className="text-slate-600">Stripe Accounts</span>
-                  <span className="font-medium">1 of 3</span>
+                  <span className="font-medium">1 of {currentPlan?.id === 'team' ? 'unlimited' : currentPlan?.id === 'pro' ? '3' : '1'}</span>
                 </div>
                 <div className="w-full bg-slate-200 rounded-full h-2">
                   <div
                     className="bg-blue-500 h-2 rounded-full"
-                    style={{ width: '33%' }}
+                    style={{ width: currentPlan?.id === 'team' ? '10%' : currentPlan?.id === 'pro' ? '33%' : '100%' }}
                   />
                 </div>
               </div>
               <div>
                 <div className="flex justify-between text-sm mb-1">
                   <span className="text-slate-600">Alerts Sent</span>
-                  <span className="font-medium">847 (unlimited)</span>
+                  <span className="font-medium">Unlimited</span>
                 </div>
                 <div className="w-full bg-slate-200 rounded-full h-2">
                   <div
                     className="bg-green-500 h-2 rounded-full"
                     style={{ width: '100%' }}
-                  />
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-slate-600">SMS Alerts</span>
-                  <span className="font-medium">23 of 100</span>
-                </div>
-                <div className="w-full bg-slate-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-500 h-2 rounded-full"
-                    style={{ width: '23%' }}
                   />
                 </div>
               </div>

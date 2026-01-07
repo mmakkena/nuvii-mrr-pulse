@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Header
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from uuid import UUID
 
 from app.database import get_db
+from app.models import User, Workspace, WorkspaceMember
 from app.models.alert import Alert, AlertStatus as DBAlertStatus, AlertSeverity as DBAlertSeverity, AlertType as DBAlertType
 from app.schemas import (
     AlertResponse,
@@ -13,8 +14,44 @@ from app.schemas import (
     AlertStatus,
     AlertType as SchemaAlertType,
 )
+from app.utils.auth import get_current_user
 
 router = APIRouter()
+
+
+async def get_user_workspace(
+    db: AsyncSession,
+    user: User,
+    workspace_id: Optional[str] = None,
+) -> Workspace:
+    """Get workspace for the current user."""
+    if workspace_id:
+        try:
+            ws_uuid = UUID(workspace_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid workspace ID format")
+
+        result = await db.execute(
+            select(Workspace)
+            .join(WorkspaceMember)
+            .where(Workspace.id == ws_uuid)
+            .where(WorkspaceMember.user_id == user.id)
+        )
+        workspace = result.scalar_one_or_none()
+        if not workspace:
+            raise HTTPException(status_code=403, detail="No access to this workspace")
+        return workspace
+
+    result = await db.execute(
+        select(Workspace)
+        .join(WorkspaceMember)
+        .where(WorkspaceMember.user_id == user.id)
+        .limit(1)
+    )
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="No workspace found")
+    return workspace
 
 
 def map_severity(db_severity: DBAlertSeverity) -> AlertSeverity:
@@ -88,10 +125,14 @@ async def list_alerts(
     alert_type: Optional[str] = Query(None, alias="type"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List alerts with optional filters."""
-    query = select(Alert).order_by(Alert.created_at.desc())
+    workspace = await get_user_workspace(db, current_user, workspace_id)
+
+    query = select(Alert).where(Alert.workspace_id == workspace.id).order_by(Alert.created_at.desc())
 
     # Apply filters
     if severity:
@@ -112,6 +153,17 @@ async def list_alerts(
         if status in status_map and status_map[status]:
             query = query.where(Alert.status.in_(status_map[status]))
 
+    if alert_type:
+        type_map = {
+            "payment_failed": DBAlertType.PAYMENT_FAILED,
+            "dispute": DBAlertType.DISPUTE_CREATED,
+            "subscription_cancelled": DBAlertType.SUBSCRIPTION_CANCELLED,
+            "payout_failed": DBAlertType.PAYOUT_FAILED,
+            "refund": DBAlertType.REFUND_SPIKE,
+        }
+        if alert_type in type_map:
+            query = query.where(Alert.alert_type == type_map[alert_type])
+
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
@@ -131,15 +183,74 @@ async def list_alerts(
     )
 
 
+@router.get("/stats")
+async def get_alert_stats(
+    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get alert statistics for the workspace."""
+    workspace = await get_user_workspace(db, current_user, workspace_id)
+
+    # Count by severity
+    critical_count = await db.execute(
+        select(func.count()).where(
+            Alert.workspace_id == workspace.id,
+            Alert.severity == DBAlertSeverity.CRITICAL,
+            Alert.status != DBAlertStatus.ACKNOWLEDGED,
+        )
+    )
+    warning_count = await db.execute(
+        select(func.count()).where(
+            Alert.workspace_id == workspace.id,
+            Alert.severity == DBAlertSeverity.WARNING,
+            Alert.status != DBAlertStatus.ACKNOWLEDGED,
+        )
+    )
+    info_count = await db.execute(
+        select(func.count()).where(
+            Alert.workspace_id == workspace.id,
+            Alert.severity == DBAlertSeverity.INFO,
+            Alert.status != DBAlertStatus.ACKNOWLEDGED,
+        )
+    )
+
+    # Total unacknowledged
+    total_active = await db.execute(
+        select(func.count()).where(
+            Alert.workspace_id == workspace.id,
+            Alert.status != DBAlertStatus.ACKNOWLEDGED,
+        )
+    )
+
+    return {
+        "critical": critical_count.scalar() or 0,
+        "warning": warning_count.scalar() or 0,
+        "info": info_count.scalar() or 0,
+        "total_active": total_active.scalar() or 0,
+    }
+
+
 @router.get("/{alert_id}", response_model=AlertResponse)
-async def get_alert(alert_id: str, db: AsyncSession = Depends(get_db)):
+async def get_alert(
+    alert_id: str,
+    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get a specific alert by ID."""
+    workspace = await get_user_workspace(db, current_user, workspace_id)
+
     try:
         alert_uuid = UUID(alert_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid alert ID format")
 
-    result = await db.execute(select(Alert).where(Alert.id == alert_uuid))
+    result = await db.execute(
+        select(Alert)
+        .where(Alert.id == alert_uuid)
+        .where(Alert.workspace_id == workspace.id)
+    )
     alert = result.scalar()
 
     if not alert:
@@ -149,30 +260,136 @@ async def get_alert(alert_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{alert_id}/acknowledge", response_model=AlertResponse)
-async def acknowledge_alert(alert_id: str, db: AsyncSession = Depends(get_db)):
+async def acknowledge_alert(
+    alert_id: str,
+    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Acknowledge an alert."""
+    workspace = await get_user_workspace(db, current_user, workspace_id)
+
     try:
         alert_uuid = UUID(alert_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid alert ID format")
 
-    result = await db.execute(select(Alert).where(Alert.id == alert_uuid))
+    result = await db.execute(
+        select(Alert)
+        .where(Alert.id == alert_uuid)
+        .where(Alert.workspace_id == workspace.id)
+    )
     alert = result.scalar()
 
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 
     alert.status = DBAlertStatus.ACKNOWLEDGED
-    await db.commit()
+    await db.flush()
     await db.refresh(alert)
 
     return alert_to_response(alert)
 
 
+@router.post("/acknowledge-all")
+async def acknowledge_all_alerts(
+    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Acknowledge all pending alerts."""
+    workspace = await get_user_workspace(db, current_user, workspace_id)
+
+    result = await db.execute(
+        select(Alert)
+        .where(Alert.workspace_id == workspace.id)
+        .where(Alert.status.in_([DBAlertStatus.PENDING, DBAlertStatus.SENT]))
+    )
+    alerts = result.scalars().all()
+
+    count = 0
+    for alert in alerts:
+        alert.status = DBAlertStatus.ACKNOWLEDGED
+        count += 1
+
+    await db.flush()
+
+    return {"success": True, "acknowledged_count": count}
+
+
 @router.post("/test")
-async def send_test_alert():
+async def send_test_alert(
+    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Send a test notification to all connected channels."""
-    return {
-        "success": True,
-        "message": "Test alert sent to all connected channels",
-    }
+    workspace = await get_user_workspace(db, current_user, workspace_id)
+
+    # Import delivery service
+    from app.services import delivery_service
+    from app.models.stripe_account import StripeAccount
+    from app.models.notification import NotificationChannel
+
+    # Check for configured notification channels
+    channel_result = await db.execute(
+        select(NotificationChannel)
+        .where(NotificationChannel.workspace_id == workspace.id)
+        .where(NotificationChannel.enabled == True)
+    )
+    channels = channel_result.scalars().all()
+
+    if not channels:
+        return {
+            "success": False,
+            "message": "No notification channels configured. Please set up Slack, Discord, Email, or SMS first.",
+        }
+
+    # Get a Stripe account for the workspace (needed for alert record)
+    stripe_result = await db.execute(
+        select(StripeAccount).where(StripeAccount.workspace_id == workspace.id).limit(1)
+    )
+    stripe_account = stripe_result.scalar_one_or_none()
+
+    # Create a test alert
+    test_alert = Alert(
+        workspace_id=workspace.id,
+        stripe_account_id=stripe_account.id if stripe_account else None,
+        alert_type=DBAlertType.MILESTONE,
+        severity=DBAlertSeverity.INFO,
+        title="Test Alert",
+        body="This is a test alert to verify your notification channels are working.",
+        metadata_json={"test": True},
+        status=DBAlertStatus.PENDING,
+    )
+
+    # Only save to DB if we have a Stripe account
+    if stripe_account:
+        db.add(test_alert)
+        await db.flush()
+        await db.refresh(test_alert)
+
+    # Try to deliver
+    try:
+        results = []
+        for channel in channels:
+            # Test each channel directly without creating delivery records
+            success, error = await delivery_service.test_channel(channel)
+            results.append({
+                "channel_type": channel.channel_type.value,
+                "channel_name": channel.name,
+                "success": success,
+                "error": error
+            })
+
+        any_success = any(r["success"] for r in results)
+        return {
+            "success": any_success,
+            "message": "Test notifications sent" if any_success else "All deliveries failed",
+            "delivery_results": results,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Failed to send test alert: {str(e)}",
+        }

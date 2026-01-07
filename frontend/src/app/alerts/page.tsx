@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { formatRelativeTime, formatCurrency } from '@/lib/utils'
 import { alertsApi, Alert } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 
 const severityConfig = {
   critical: {
@@ -60,6 +61,7 @@ const statusConfig = {
 }
 
 export default function AlertsPage() {
+  const { isLoading: authLoading, token } = useAuth()
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -68,6 +70,8 @@ export default function AlertsPage() {
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null)
 
   useEffect(() => {
+    if (authLoading || !token) return
+
     async function fetchAlerts() {
       try {
         setLoading(true)
@@ -83,7 +87,7 @@ export default function AlertsPage() {
       }
     }
     fetchAlerts()
-  }, [selectedSeverity, selectedStatus])
+  }, [authLoading, token, selectedSeverity, selectedStatus])
 
   const handleAcknowledge = async (id: string) => {
     try {
@@ -106,7 +110,7 @@ export default function AlertsPage() {
     return matchesSearch
   })
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <DashboardLayout>
         <Header title="Alerts" description="Monitor all your Stripe alerts and notifications" />

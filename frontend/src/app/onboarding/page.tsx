@@ -13,7 +13,9 @@ import {
   Check,
   ArrowRight,
   ArrowLeft,
+  Loader2,
 } from 'lucide-react'
+import { workspacesApi, rulesApi } from '@/lib/api'
 
 const steps = [
   { id: 'workspace', title: 'Create Workspace', icon: Building2 },
@@ -50,12 +52,42 @@ export default function OnboardingPage() {
   const [selectedPacks, setSelectedPacks] = useState<string[]>(['founder'])
   const [isConnectingStripe, setIsConnectingStripe] = useState(false)
   const [stripeConnected, setStripeConnected] = useState(false)
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleNext = () => {
+  const handleNext = async () => {
+    setError(null)
+
+    // Create workspace when moving from step 0
+    if (currentStep === 0 && workspaceName.trim()) {
+      setIsCreatingWorkspace(true)
+      try {
+        const workspace = await workspacesApi.create({ name: workspaceName.trim() })
+        localStorage.setItem('workspace_id', workspace.id)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to create workspace')
+        setIsCreatingWorkspace(false)
+        return
+      }
+      setIsCreatingWorkspace(false)
+    }
+
+    // Apply selected alert presets when finishing
+    if (currentStep === steps.length - 1) {
+      for (const packId of selectedPacks) {
+        try {
+          await rulesApi.applyPreset(packId)
+        } catch (err) {
+          // Continue even if preset fails
+          console.error(`Failed to apply preset ${packId}:`, err)
+        }
+      }
+      router.push('/dashboard')
+      return
+    }
+
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1)
-    } else {
-      router.push('/dashboard')
     }
   }
 
@@ -78,6 +110,11 @@ export default function OnboardingPage() {
     setSelectedPacks((prev) =>
       prev.includes(packId) ? prev.filter((id) => id !== packId) : [...prev, packId]
     )
+  }
+
+  const canProceed = () => {
+    if (currentStep === 0) return workspaceName.trim().length > 0
+    return true
   }
 
   const renderStep = () => {
@@ -269,19 +306,35 @@ export default function OnboardingPage() {
               Step {currentStep + 1} of {steps.length}
             </CardDescription>
           </CardHeader>
-          <CardContent>{renderStep()}</CardContent>
+          <CardContent>
+            {error && (
+              <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+                {error}
+              </div>
+            )}
+            {renderStep()}
+          </CardContent>
           <div className="flex justify-between p-6 pt-0">
             <Button
               variant="outline"
               onClick={handleBack}
-              disabled={currentStep === 0}
+              disabled={currentStep === 0 || isCreatingWorkspace}
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back
             </Button>
-            <Button onClick={handleNext}>
-              {currentStep === steps.length - 1 ? 'Finish' : 'Continue'}
-              <ArrowRight className="w-4 h-4 ml-2" />
+            <Button onClick={handleNext} disabled={!canProceed() || isCreatingWorkspace}>
+              {isCreatingWorkspace ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  {currentStep === steps.length - 1 ? 'Finish' : 'Continue'}
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </>
+              )}
             </Button>
           </div>
         </Card>

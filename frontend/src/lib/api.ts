@@ -2,6 +2,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface FetchOptions extends RequestInit {
   token?: string
+  skipAuth?: boolean
 }
 
 class ApiError extends Error {
@@ -11,19 +12,37 @@ class ApiError extends Error {
   }
 }
 
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('access_token')
+}
+
+function getStoredWorkspaceId(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('workspace_id')
+}
+
 async function fetchApi<T>(
   endpoint: string,
   options: FetchOptions = {}
 ): Promise<T> {
-  const { token, ...fetchOptions } = options
+  const { token, skipAuth, ...fetchOptions } = options
 
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers || {}),
+    ...(options.headers as Record<string, string> || {}),
   }
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+  // Use provided token, or get from localStorage
+  const authToken = token || (!skipAuth ? getStoredToken() : null)
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`
+  }
+
+  // Add workspace ID header if available
+  const workspaceId = getStoredWorkspaceId()
+  if (workspaceId) {
+    headers['X-Workspace-ID'] = workspaceId
   }
 
   const response = await fetch(`${API_URL}${endpoint}`, {
@@ -33,6 +52,12 @@ async function fetchApi<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }))
+
+    // If unauthorized, could trigger logout
+    if (response.status === 401) {
+      throw new ApiError(response.status, 'Not authorized')
+    }
+
     throw new ApiError(response.status, error.detail || 'Request failed')
   }
 
@@ -145,12 +170,13 @@ export interface DashboardStats {
 // Auth API
 export const authApi = {
   signup: (data: { email: string; password: string; name: string }) =>
-    fetchApi('/api/auth/signup', { method: 'POST', body: JSON.stringify(data) }),
+    fetchApi('/api/auth/signup', { method: 'POST', body: JSON.stringify(data), skipAuth: true }),
 
   login: (data: { email: string; password: string }) =>
-    fetchApi<{ access_token: string; refresh_token: string }>('/api/auth/login', {
+    fetchApi<{ user: any; tokens: { access_token: string; refresh_token: string } }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify(data),
+      skipAuth: true,
     }),
 
   me: (token: string) =>
@@ -160,19 +186,66 @@ export const authApi = {
     fetchApi<{ access_token: string }>('/api/auth/refresh', {
       method: 'POST',
       body: JSON.stringify({ refresh_token: refreshToken }),
+      skipAuth: true,
     }),
+}
+
+// Workspace Types
+export interface WorkspaceResponse {
+  id: string
+  name: string
+  slug: string
+  owner_id: string
+  plan: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspaceMemberResponse {
+  id: string
+  user_id: string
+  user_email: string
+  user_name: string
+  role: 'owner' | 'admin' | 'member' | 'viewer'
+  invited_at: string
+  joined_at: string | null
+}
+
+export interface WorkspaceWithMembersResponse {
+  workspace: WorkspaceResponse
+  members: WorkspaceMemberResponse[]
 }
 
 // Workspaces API
 export const workspacesApi = {
-  list: (token: string) =>
-    fetchApi('/api/workspaces', { token }),
+  list: (token?: string) =>
+    fetchApi<WorkspaceResponse[]>('/api/workspaces', token ? { token } : {}),
 
-  create: (token: string, data: { name: string }) =>
-    fetchApi('/api/workspaces', { token, method: 'POST', body: JSON.stringify(data) }),
+  create: (data: { name: string }) =>
+    fetchApi<WorkspaceResponse>('/api/workspaces', { method: 'POST', body: JSON.stringify(data) }),
 
-  get: (token: string, id: string) =>
-    fetchApi(`/api/workspaces/${id}`, { token }),
+  get: (id: string) =>
+    fetchApi<WorkspaceWithMembersResponse>(`/api/workspaces/${id}`),
+
+  update: (id: string, data: { name: string }) =>
+    fetchApi<WorkspaceResponse>(`/api/workspaces/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  inviteMember: (workspaceId: string, data: { email: string; role: string }) =>
+    fetchApi<WorkspaceMemberResponse>(`/api/workspaces/${workspaceId}/members`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  removeMember: (workspaceId: string, userId: string) =>
+    fetchApi<{ message: string }>(`/api/workspaces/${workspaceId}/members/${userId}`, {
+      method: 'DELETE',
+    }),
+
+  updateMemberRole: (workspaceId: string, userId: string, data: { role: string }) =>
+    fetchApi<WorkspaceMemberResponse>(`/api/workspaces/${workspaceId}/members/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 }
 
 // Alerts API

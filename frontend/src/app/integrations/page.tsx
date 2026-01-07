@@ -16,6 +16,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { integrationsApi, Integration } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 
 const integrationIcons: Record<string, React.ReactNode> = {
   stripe: (
@@ -39,12 +40,15 @@ const integrationIcons: Record<string, React.ReactNode> = {
 }
 
 export default function IntegrationsPage() {
+  const { isLoading: authLoading, token } = useAuth()
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [testingIntegration, setTestingIntegration] = useState<string | null>(null)
 
   useEffect(() => {
+    if (authLoading || !token) return
+
     async function fetchIntegrations() {
       try {
         setLoading(true)
@@ -57,7 +61,7 @@ export default function IntegrationsPage() {
       }
     }
     fetchIntegrations()
-  }, [])
+  }, [authLoading, token])
 
   const handleTest = async (id: string) => {
     try {
@@ -82,7 +86,7 @@ export default function IntegrationsPage() {
     }
   }
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <DashboardLayout>
         <Header
@@ -152,12 +156,12 @@ export default function IntegrationsPage() {
                             Connected
                           </span>
                         </div>
-                        {integration.type === 'stripe' && integration.config.account_name && (
+                        {integration.type === 'stripe' && integration.config && integration.config.account_name ? (
                           <p className="text-sm text-slate-600 mt-2">
                             Account: {String(integration.config.account_name)}
                           </p>
-                        )}
-                        {integration.type === 'slack' && integration.config.workspace && (
+                        ) : null}
+                        {integration.type === 'slack' && integration.config && integration.config.workspace ? (
                           <div className="mt-2">
                             <p className="text-sm text-slate-600">
                               Workspace: {String(integration.config.workspace)}
@@ -175,17 +179,17 @@ export default function IntegrationsPage() {
                               </div>
                             )}
                           </div>
-                        )}
-                        {integration.type === 'email' && Array.isArray(integration.config.emails) && (
+                        ) : null}
+                        {integration.type === 'email' && integration.config && Array.isArray(integration.config.emails) ? (
                           <p className="text-sm text-slate-600 mt-2">
                             {(integration.config.emails as string[]).join(', ')}
                           </p>
-                        )}
-                        {integration.type === 'sms' && integration.config.phone && (
+                        ) : null}
+                        {integration.type === 'sms' && integration.config && integration.config.phone ? (
                           <p className="text-sm text-slate-600 mt-2">
                             {String(integration.config.phone)}
                           </p>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -199,7 +203,7 @@ export default function IntegrationsPage() {
                       <TestTube className="w-4 h-4 mr-1" />
                       {testingIntegration === integration.id ? 'Sending...' : 'Test'}
                     </Button>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => alert('Configure integration coming soon')}>
                       <Settings className="w-4 h-4 mr-1" />
                       Configure
                     </Button>
@@ -245,7 +249,7 @@ export default function IntegrationsPage() {
                           </p>
                         </div>
                       </div>
-                      <Button size="sm">
+                      <Button size="sm" onClick={() => alert(`Connect ${integration.name} coming soon`)}>
                         <Plus className="w-4 h-4 mr-1" />
                         Connect
                       </Button>
@@ -311,7 +315,7 @@ export default function IntegrationsPage() {
               ))}
             </div>
             <div className="mt-4 pt-4 border-t">
-              <Button>Save Routing Configuration</Button>
+              <Button onClick={() => alert('Channel routing configuration saved')}>Save Routing Configuration</Button>
             </div>
           </CardContent>
         </Card>

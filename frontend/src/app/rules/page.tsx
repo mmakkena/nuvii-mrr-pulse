@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { DashboardLayout, Header } from '@/components/layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Plus,
   Edit,
@@ -17,19 +18,33 @@ import {
   Shield,
   Bell,
   Loader2,
+  X,
 } from 'lucide-react'
 import { rulesApi, Rule } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 
 const ruleTypeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   payment_failed: CreditCard,
   revenue_drop: TrendingDown,
-  dispute: AlertTriangle,
-  dispute_rate: Shield,
+  dispute_created: AlertTriangle,
+  dispute_rate_warning: Shield,
   subscription_cancelled: DollarSign,
   refund_spike: AlertTriangle,
-  high_value_customer: DollarSign,
+  subscription_created: DollarSign,
   payout_failed: CreditCard,
+  velocity_spike: AlertTriangle,
 }
+
+const ruleTypes = [
+  { value: 'payment_failed', label: 'Payment Failed' },
+  { value: 'dispute_created', label: 'New Dispute' },
+  { value: 'dispute_rate_warning', label: 'Dispute Rate Threshold' },
+  { value: 'subscription_cancelled', label: 'Subscription Cancelled' },
+  { value: 'revenue_drop', label: 'Revenue Drop' },
+  { value: 'refund_spike', label: 'Refund Spike' },
+  { value: 'subscription_created', label: 'High Value Customer Activity' },
+  { value: 'payout_failed', label: 'Payout Failed' },
+]
 
 const channelIcons = {
   slack: (
@@ -47,12 +62,29 @@ const channelIcons = {
 }
 
 export default function RulesPage() {
+  const { isLoading: authLoading, token } = useAuth()
   const [rules, setRules] = useState<Rule[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [applyingPreset, setApplyingPreset] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+  // Create/Edit modal state
+  const [showModal, setShowModal] = useState(false)
+  const [editingRule, setEditingRule] = useState<Rule | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    type: 'payment_failed',
+    enabled: true,
+    channels: ['email'] as string[],
+    conditions: {} as Record<string, unknown>,
+  })
 
   useEffect(() => {
+    if (authLoading || !token) return
+
     async function fetchRules() {
       try {
         setLoading(true)
@@ -65,7 +97,72 @@ export default function RulesPage() {
       }
     }
     fetchRules()
-  }, [])
+  }, [authLoading, token])
+
+  const openCreateModal = () => {
+    setEditingRule(null)
+    setFormData({
+      name: '',
+      description: '',
+      type: 'payment_failed',
+      enabled: true,
+      channels: ['email'],
+      conditions: {},
+    })
+    setShowModal(true)
+  }
+
+  const openEditModal = (rule: Rule) => {
+    setEditingRule(rule)
+    setFormData({
+      name: rule.name,
+      description: rule.description,
+      type: rule.type,
+      enabled: rule.enabled,
+      channels: rule.channels,
+      conditions: rule.conditions,
+    })
+    setShowModal(true)
+  }
+
+  const handleSaveRule = async () => {
+    if (!formData.name || !formData.description) {
+      setError('Name and description are required')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+
+    try {
+      if (editingRule) {
+        // Update existing rule
+        const updated = await rulesApi.update(editingRule.id, formData)
+        setRules(prev => prev.map(r => r.id === editingRule.id ? updated : r))
+        setSuccessMessage('Rule updated successfully')
+      } else {
+        // Create new rule
+        const created = await rulesApi.create(formData)
+        setRules(prev => [...prev, created])
+        setSuccessMessage('Rule created successfully')
+      }
+      setShowModal(false)
+      setTimeout(() => setSuccessMessage(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save rule')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const toggleChannel = (channel: string) => {
+    setFormData(prev => ({
+      ...prev,
+      channels: prev.channels.includes(channel)
+        ? prev.channels.filter(c => c !== channel)
+        : [...prev.channels, channel]
+    }))
+  }
 
   const toggleRule = async (id: string) => {
     const rule = rules.find((r) => r.id === id)
@@ -87,6 +184,8 @@ export default function RulesPage() {
     try {
       await rulesApi.delete(id)
       setRules((prev) => prev.filter((r) => r.id !== id))
+      setSuccessMessage('Rule deleted successfully')
+      setTimeout(() => setSuccessMessage(null), 3000)
     } catch (err) {
       alert('Failed to delete rule')
     }
@@ -100,7 +199,8 @@ export default function RulesPage() {
         // Refresh rules list
         const response = await rulesApi.list()
         setRules(response)
-        alert(`${presetName.charAt(0).toUpperCase() + presetName.slice(1)} Pack applied successfully!`)
+        setSuccessMessage(`${presetName.charAt(0).toUpperCase() + presetName.slice(1)} Pack applied successfully!`)
+        setTimeout(() => setSuccessMessage(null), 3000)
       }
     } catch (err) {
       alert('Failed to apply preset')
@@ -109,7 +209,7 @@ export default function RulesPage() {
     }
   }
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <DashboardLayout>
         <Header title="Alert Rules" description="Configure when and how you receive alerts" />
@@ -120,7 +220,7 @@ export default function RulesPage() {
     )
   }
 
-  if (error) {
+  if (error && !showModal) {
     return (
       <DashboardLayout>
         <Header title="Alert Rules" description="Configure when and how you receive alerts" />
@@ -143,6 +243,13 @@ export default function RulesPage() {
       <Header title="Alert Rules" description="Configure when and how you receive alerts" />
 
       <div className="p-6 space-y-6">
+        {/* Success/Error Messages */}
+        {successMessage && (
+          <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">
+            {successMessage}
+          </div>
+        )}
+
         {/* Header actions */}
         <div className="flex justify-between items-center">
           <div className="flex gap-2">
@@ -159,7 +266,7 @@ export default function RulesPage() {
               Revenue Alerts
             </Button>
           </div>
-          <Button>
+          <Button onClick={openCreateModal}>
             <Plus className="w-4 h-4 mr-2" />
             Create Rule
           </Button>
@@ -226,84 +333,197 @@ export default function RulesPage() {
 
         {/* Rules List */}
         <div className="space-y-4">
-          {rules.map((rule) => {
-            const Icon = ruleTypeIcons[rule.type] || Bell
+          {rules.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-slate-500">No rules configured yet. Create your first rule or apply a preset to get started.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            rules.map((rule) => {
+              const Icon = ruleTypeIcons[rule.type] || Bell
 
-            return (
-              <Card
-                key={rule.id}
-                className={`transition-opacity ${
-                  rule.enabled ? 'opacity-100' : 'opacity-60'
-                }`}
-              >
-                <CardContent className="py-4">
-                  <div className="flex items-center gap-4">
-                    <div
-                      className={`p-3 rounded-lg ${
-                        rule.enabled ? 'bg-blue-100' : 'bg-slate-100'
-                      }`}
-                    >
-                      <Icon
-                        className={`w-5 h-5 ${
-                          rule.enabled ? 'text-blue-600' : 'text-slate-400'
+              return (
+                <Card
+                  key={rule.id}
+                  className={`transition-opacity ${
+                    rule.enabled ? 'opacity-100' : 'opacity-60'
+                  }`}
+                >
+                  <CardContent className="py-4">
+                    <div className="flex items-center gap-4">
+                      <div
+                        className={`p-3 rounded-lg ${
+                          rule.enabled ? 'bg-blue-100' : 'bg-slate-100'
                         }`}
-                      />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-slate-900">{rule.name}</h3>
-                        {!rule.enabled && (
-                          <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">
-                            Disabled
-                          </span>
-                        )}
+                      >
+                        <Icon
+                          className={`w-5 h-5 ${
+                            rule.enabled ? 'text-blue-600' : 'text-slate-400'
+                          }`}
+                        />
                       </div>
-                      <p className="text-sm text-slate-500 mt-0.5">{rule.description}</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <span className="text-xs text-slate-400">Channels:</span>
-                        <div className="flex items-center gap-1">
-                          {rule.channels.map((channel) => (
-                            <div
-                              key={channel}
-                              className="p-1 bg-slate-100 rounded text-slate-600"
-                              title={channel}
-                            >
-                              {channelIcons[channel as keyof typeof channelIcons]}
-                            </div>
-                          ))}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-slate-900">{rule.name}</h3>
+                          {!rule.enabled && (
+                            <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">
+                              Disabled
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-slate-500 mt-0.5">{rule.description}</p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="text-xs text-slate-400">Channels:</span>
+                          <div className="flex items-center gap-1">
+                            {rule.channels.map((channel) => (
+                              <div
+                                key={channel}
+                                className="p-1 bg-slate-100 rounded text-slate-600"
+                                title={channel}
+                              >
+                                {channelIcons[channel as keyof typeof channelIcons]}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="icon" onClick={() => openEditModal(rule)}>
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteRule(rule.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => toggleRule(rule.id)}
+                        >
+                          {rule.enabled ? (
+                            <ToggleRight className="w-6 h-6 text-blue-600" />
+                          ) : (
+                            <ToggleLeft className="w-6 h-6 text-slate-400" />
+                          )}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="icon">
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDeleteRule(rule.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => toggleRule(rule.id)}
-                      >
-                        {rule.enabled ? (
-                          <ToggleRight className="w-6 h-6 text-blue-600" />
-                        ) : (
-                          <ToggleLeft className="w-6 h-6 text-slate-400" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
+                  </CardContent>
+                </Card>
+              )
+            })
+          )}
         </div>
       </div>
+
+      {/* Create/Edit Rule Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">
+                {editingRule ? 'Edit Rule' : 'Create New Rule'}
+              </h3>
+              <button onClick={() => setShowModal(false)}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {error && (
+              <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+                {error}
+                <button onClick={() => setError(null)} className="ml-2 underline">Dismiss</button>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Rule Name</label>
+                <Input
+                  placeholder="e.g., High-value Payment Alert"
+                  value={formData.name}
+                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Description</label>
+                <Input
+                  placeholder="Describe when this rule triggers"
+                  value={formData.description}
+                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Rule Type</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2"
+                  value={formData.type}
+                  onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value }))}
+                >
+                  {ruleTypes.map(type => (
+                    <option key={type.value} value={type.value}>{type.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Notification Channels</label>
+                <div className="flex flex-wrap gap-2">
+                  {['email', 'slack', 'discord', 'sms'].map(channel => (
+                    <button
+                      key={channel}
+                      type="button"
+                      onClick={() => toggleChannel(channel)}
+                      className={`px-3 py-1.5 rounded-lg border text-sm capitalize ${
+                        formData.channels.includes(channel)
+                          ? 'bg-blue-50 border-blue-500 text-blue-700'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {channel}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="enabled"
+                  checked={formData.enabled}
+                  onChange={(e) => setFormData(prev => ({ ...prev, enabled: e.target.checked }))}
+                  className="rounded border-slate-300"
+                />
+                <label htmlFor="enabled" className="text-sm text-slate-600">
+                  Enable this rule immediately
+                </label>
+              </div>
+
+              <div className="flex gap-3 justify-end pt-4">
+                <Button variant="outline" onClick={() => setShowModal(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSaveRule} disabled={saving}>
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      {editingRule ? 'Updating...' : 'Creating...'}
+                    </>
+                  ) : (
+                    editingRule ? 'Update Rule' : 'Create Rule'
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   )
 }
