@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List, Literal
 from datetime import datetime
 from enum import Enum
+import uuid
 
 
 # === Auth Schemas ===
@@ -21,13 +22,90 @@ class UserResponse(BaseModel):
     id: str
     email: str
     name: str
+    avatar_url: Optional[str] = None
+    email_verified: bool
     created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class AuthResponse(BaseModel):
+    user: UserResponse
+    tokens: TokenResponse
+
+
+# === Workspace Schemas ===
+class WorkspaceRole(str, Enum):
+    owner = "owner"
+    admin = "admin"
+    member = "member"
+    viewer = "viewer"
+
+
+class WorkspacePlan(str, Enum):
+    starter = "starter"
+    pro = "pro"
+    team = "team"
+
+
+class WorkspaceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    slug: Optional[str] = Field(None, min_length=1, max_length=255)
+
+
+class WorkspaceUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+
+
+class WorkspaceResponse(BaseModel):
+    id: str
+    name: str
+    slug: str
+    owner_id: str
+    plan: WorkspacePlan
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WorkspaceMemberResponse(BaseModel):
+    id: str
+    user_id: str
+    user_email: str
+    user_name: str
+    role: WorkspaceRole
+    invited_at: datetime
+    joined_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class WorkspaceWithMembersResponse(BaseModel):
+    workspace: WorkspaceResponse
+    members: List[WorkspaceMemberResponse]
+
+
+class InviteMemberRequest(BaseModel):
+    email: EmailStr
+    role: WorkspaceRole = WorkspaceRole.member
+
+
+class UpdateMemberRoleRequest(BaseModel):
+    role: WorkspaceRole
 
 
 # === Alert Schemas ===
