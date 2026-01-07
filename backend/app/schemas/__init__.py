@@ -322,3 +322,47 @@ class DashboardStats(BaseModel):
     failed_payments_change: float
     dispute_rate: float
     dispute_rate_change: float
+
+
+# === Stripe Connect Schemas ===
+class StripeAccountStatus(str, Enum):
+    connected = "connected"
+    disconnected = "disconnected"
+    error = "error"
+
+
+class StripeAccountResponse(BaseModel):
+    id: str
+    stripe_account_id: str
+    business_name: Optional[str] = None
+    currency: str
+    country: Optional[str] = None
+    status: StripeAccountStatus
+    connected_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class StripeConnectStartResponse(BaseModel):
+    authorization_url: str
+    state: str
+
+
+class StripeConnectCallbackRequest(BaseModel):
+    code: str
+    state: str
+
+
+class StripeEventResponse(BaseModel):
+    id: str
+    stripe_event_id: str
+    event_type: str
+    status: str
+    created_at: datetime
+    processed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+    class Config:
+        from_attributes = True
