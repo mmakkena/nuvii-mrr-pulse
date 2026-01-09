@@ -85,7 +85,7 @@ async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
         email_verified=False,
     )
     db.add(user)
-    await db.flush()
+    await db.commit()
     await db.refresh(user)
 
     access_token = create_access_token(user.id)

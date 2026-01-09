@@ -279,6 +279,51 @@ class SMSIntegrationCreate(BaseModel):
     phone_number: str
 
 
+# === Multi-Provider Integration Schemas ===
+class EmailProviderConfig(BaseModel):
+    enabled: bool = True
+
+
+class SESConfig(EmailProviderConfig):
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_region: Optional[str] = "us-east-1"
+    from_email: Optional[str] = "alerts@mrrpulse.com"
+
+
+class SendGridConfig(EmailProviderConfig):
+    api_key: str
+    from_email: Optional[str] = "alerts@mrrpulse.com"
+
+
+class SMSProviderConfig(BaseModel):
+    enabled: bool = True
+
+
+class SNSConfig(SMSProviderConfig):
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_region: Optional[str] = "us-east-1"
+
+
+class TwilioConfig(SMSProviderConfig):
+    account_sid: str
+    auth_token: str
+    from_phone: str
+
+
+class MultiProviderEmailCreate(BaseModel):
+    emails: List[EmailStr]
+    primary_provider: Literal["ses", "sendgrid"] = "ses"
+    providers: dict  # Keys: "ses", "sendgrid"; Values: provider configs
+
+
+class MultiProviderSMSCreate(BaseModel):
+    phone_number: str
+    primary_provider: Literal["sns", "twilio"] = "sns"
+    providers: dict  # Keys: "sns", "twilio"; Values: provider configs
+
+
 # === Billing Schemas ===
 class PlanTier(str, Enum):
     starter = "starter"

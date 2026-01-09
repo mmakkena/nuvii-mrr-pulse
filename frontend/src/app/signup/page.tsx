@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { authApi } from '@/lib/api'
 
 export default function SignupPage() {
   const router = useRouter()
@@ -25,11 +26,21 @@ export default function SignupPage() {
     }
     setIsLoading(true)
 
-    // TODO: Implement actual signup
-    setTimeout(() => {
-      setIsLoading(false)
+    try {
+      const response = await authApi.signup({
+        email: formData.email,
+        password: formData.password,
+        name: formData.name,
+      })
+
+      localStorage.setItem('access_token', response.tokens.access_token)
+      localStorage.setItem('refresh_token', response.tokens.refresh_token)
       router.push('/onboarding')
-    }, 1000)
+    } catch (error) {
+      console.error('Signup failed:', error)
+      alert(error instanceof Error ? error.message : 'Failed to create account')
+      setIsLoading(false)
+    }
   }
 
   const handleGoogleSignup = () => {

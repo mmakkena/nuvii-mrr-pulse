@@ -62,3 +62,6 @@ htmlcov/
 # Misc
 *.bak
 *.tmp
+
+.playwright/
+.playwright-mcp/

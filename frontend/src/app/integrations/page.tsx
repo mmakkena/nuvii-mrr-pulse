@@ -121,8 +121,9 @@ export default function IntegrationsPage() {
     )
   }
 
-  const connectedIntegrations = integrations.filter((i) => i.status === 'connected')
-  const availableIntegrations = integrations.filter((i) => i.status !== 'connected')
+  // Filter out Discord as requested (keep in backend but hide in frontend)
+  const connectedIntegrations = integrations.filter((i) => i.status === 'connected' && i.type !== 'discord')
+  const availableIntegrations = integrations.filter((i) => i.status !== 'connected' && i.type !== 'discord')
 
   return (
     <DashboardLayout>
@@ -181,14 +182,32 @@ export default function IntegrationsPage() {
                           </div>
                         ) : null}
                         {integration.type === 'email' && integration.config && Array.isArray(integration.config.emails) ? (
-                          <p className="text-sm text-slate-600 mt-2">
-                            {(integration.config.emails as string[]).join(', ')}
-                          </p>
+                          <div className="mt-2">
+                            <p className="text-sm text-slate-600">
+                              {(integration.config.emails as string[]).join(', ')}
+                            </p>
+                            {integration.config.providers && integration.config.primary_provider ? (
+                              <p className="text-xs text-slate-500 mt-1">
+                                Provider: {String(integration.config.primary_provider).toUpperCase()}
+                                {Object.keys(integration.config.providers as Record<string, unknown>).length > 1 &&
+                                  ' (with fallback)'}
+                              </p>
+                            ) : null}
+                          </div>
                         ) : null}
-                        {integration.type === 'sms' && integration.config && integration.config.phone ? (
-                          <p className="text-sm text-slate-600 mt-2">
-                            {String(integration.config.phone)}
-                          </p>
+                        {integration.type === 'sms' && integration.config && (integration.config.phone || integration.config.phone_number) ? (
+                          <div className="mt-2">
+                            <p className="text-sm text-slate-600">
+                              {String(integration.config.phone || integration.config.phone_number)}
+                            </p>
+                            {integration.config.providers && integration.config.primary_provider ? (
+                              <p className="text-xs text-slate-500 mt-1">
+                                Provider: {String(integration.config.primary_provider).toUpperCase()}
+                                {Object.keys(integration.config.providers as Record<string, unknown>).length > 1 &&
+                                  ' (with fallback)'}
+                              </p>
+                            ) : null}
+                          </div>
                         ) : null}
                       </div>
                     </div>

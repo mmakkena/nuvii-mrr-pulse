@@ -4,8 +4,8 @@ Alert Delivery Service
 Handles delivering alerts to configured notification channels:
 - Slack (via webhook)
 - Discord (via webhook)
-- Email (via AWS SES)
-- SMS (via AWS SNS)
+- Email (via AWS SES, SendGrid)
+- SMS (via AWS SNS, Twilio)
 """
 import json
 import logging
@@ -15,6 +15,10 @@ from uuid import UUID
 import httpx
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
+from twilio.rest import Client as TwilioClient
+from twilio.base.exceptions import TwilioRestException
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -298,17 +302,22 @@ async def send_email_ses(to_emails: list[str], subject: str, html_body: str) -> 
         return False, error_msg
 
 
-async def send_sms_sns(phone_number: str, message: str) -> tuple[bool, Optional[str]]:
+async def send_sms_sns(phone_number: str, message: str, aws_config: Optional[dict] = None) -> tuple[bool, Optional[str]]:
     """Send SMS via AWS SNS."""
-    if not settings.aws_access_key_id or not settings.aws_secret_access_key:
+    # Use provided config or fall back to settings
+    aws_key = aws_config.get("aws_access_key_id") if aws_config else settings.aws_access_key_id
+    aws_secret = aws_config.get("aws_secret_access_key") if aws_config else settings.aws_secret_access_key
+    aws_region = aws_config.get("aws_region") if aws_config else settings.aws_region
+
+    if not aws_key or not aws_secret:
         return False, "AWS credentials not configured"
 
     try:
         sns_client = boto3.client(
             "sns",
-            region_name=settings.aws_region,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
+            region_name=aws_region,
+            aws_access_key_id=aws_key,
+            aws_secret_access_key=aws_secret,
         )
 
         response = sns_client.publish(
@@ -328,6 +337,61 @@ async def send_sms_sns(phone_number: str, message: str) -> tuple[bool, Optional[
         error_msg = e.response["Error"]["Message"]
         logger.error(f"SNS error: {error_msg}")
         return False, error_msg
+
+
+async def send_email_sendgrid(to_emails: list[str], subject: str, html_body: str, sendgrid_config: dict) -> tuple[bool, Optional[str]]:
+    """Send email via SendGrid."""
+    api_key = sendgrid_config.get("api_key")
+    from_email = sendgrid_config.get("from_email", "alerts@mrrpulse.com")
+
+    if not api_key:
+        return False, "SendGrid API key not configured"
+
+    try:
+        message = Mail(
+            from_email=from_email,
+            to_emails=to_emails,
+            subject=subject,
+            html_content=html_body
+        )
+
+        sg = SendGridAPIClient(api_key)
+        response = sg.send(message)
+
+        if response.status_code in (200, 201, 202):
+            return True, None
+        else:
+            return False, f"SendGrid returned status {response.status_code}"
+    except Exception as e:
+        logger.error(f"SendGrid error: {e}")
+        return False, str(e)
+
+
+async def send_sms_twilio(phone_number: str, message: str, twilio_config: dict) -> tuple[bool, Optional[str]]:
+    """Send SMS via Twilio."""
+    account_sid = twilio_config.get("account_sid")
+    auth_token = twilio_config.get("auth_token")
+    from_phone = twilio_config.get("from_phone")
+
+    if not account_sid or not auth_token or not from_phone:
+        return False, "Twilio credentials not configured"
+
+    try:
+        client = TwilioClient(account_sid, auth_token)
+
+        message_obj = client.messages.create(
+            body=message,
+            from_=from_phone,
+            to=phone_number
+        )
+
+        return True, None
+    except TwilioRestException as e:
+        logger.error(f"Twilio error: {e}")
+        return False, str(e)
+    except Exception as e:
+        logger.error(f"Twilio error: {e}")
+        return False, str(e)
 
 
 async def deliver_to_channel(
@@ -375,20 +439,94 @@ async def deliver_to_channel(
 
         elif channel.channel_type == ChannelType.EMAIL:
             emails = channel.config_json.get("emails", [])
-            if emails:
-                subject, html_body = format_email_body(alert)
-                success, error = await send_email_ses(emails, subject, html_body)
-            else:
+            if not emails:
                 error = "No email addresses configured"
+            else:
+                subject, html_body = format_email_body(alert)
+
+                # Check if multi-provider configuration exists
+                if "providers" in channel.config_json and channel.config_json.get("providers"):
+                    providers = channel.config_json["providers"]
+                    primary_provider = channel.config_json.get("primary_provider", "ses")
+
+                    # Try primary provider first
+                    if primary_provider == "sendgrid" and "sendgrid" in providers:
+                        config = providers["sendgrid"]
+                        if config.get("enabled", True):
+                            success, error = await send_email_sendgrid(emails, subject, html_body, config)
+                            if not success:
+                                logger.warning(f"Primary email provider (SendGrid) failed: {error}")
+                    elif primary_provider == "ses" and "ses" in providers:
+                        config = providers["ses"]
+                        if config.get("enabled", True):
+                            success, error = await send_email_ses(emails, subject, html_body)
+                            if not success:
+                                logger.warning(f"Primary email provider (SES) failed: {error}")
+
+                    # Try fallback provider if primary failed
+                    if not success:
+                        for provider_name, config in providers.items():
+                            if provider_name != primary_provider and config.get("enabled", True):
+                                logger.info(f"Attempting fallback email provider: {provider_name}")
+                                if provider_name == "sendgrid":
+                                    success, error = await send_email_sendgrid(emails, subject, html_body, config)
+                                elif provider_name == "ses":
+                                    success, error = await send_email_ses(emails, subject, html_body)
+
+                                if success:
+                                    logger.info(f"Fallback email provider {provider_name} succeeded")
+                                    break
+                                else:
+                                    logger.warning(f"Fallback email provider {provider_name} failed: {error}")
+                else:
+                    # Legacy single-provider configuration (backward compatibility)
+                    success, error = await send_email_ses(emails, subject, html_body)
 
         elif channel.channel_type == ChannelType.SMS:
             # Support both 'phone_number' and 'phone' keys for compatibility
             phone = channel.config_json.get("phone_number") or channel.config_json.get("phone")
-            if phone:
-                message = format_sms_message(alert)
-                success, error = await send_sms_sns(phone, message)
-            else:
+            if not phone:
                 error = "No phone number configured"
+            else:
+                message = format_sms_message(alert)
+
+                # Check if multi-provider configuration exists
+                if "providers" in channel.config_json and channel.config_json.get("providers"):
+                    providers = channel.config_json["providers"]
+                    primary_provider = channel.config_json.get("primary_provider", "sns")
+
+                    # Try primary provider first
+                    if primary_provider == "twilio" and "twilio" in providers:
+                        config = providers["twilio"]
+                        if config.get("enabled", True):
+                            success, error = await send_sms_twilio(phone, message, config)
+                            if not success:
+                                logger.warning(f"Primary SMS provider (Twilio) failed: {error}")
+                    elif primary_provider == "sns" and "sns" in providers:
+                        config = providers["sns"]
+                        if config.get("enabled", True):
+                            success, error = await send_sms_sns(phone, message, config)
+                            if not success:
+                                logger.warning(f"Primary SMS provider (SNS) failed: {error}")
+
+                    # Try fallback provider if primary failed
+                    if not success:
+                        for provider_name, config in providers.items():
+                            if provider_name != primary_provider and config.get("enabled", True):
+                                logger.info(f"Attempting fallback SMS provider: {provider_name}")
+                                if provider_name == "twilio":
+                                    success, error = await send_sms_twilio(phone, message, config)
+                                elif provider_name == "sns":
+                                    success, error = await send_sms_sns(phone, message, config)
+
+                                if success:
+                                    logger.info(f"Fallback SMS provider {provider_name} succeeded")
+                                    break
+                                else:
+                                    logger.warning(f"Fallback SMS provider {provider_name} failed: {error}")
+                else:
+                    # Legacy single-provider configuration (backward compatibility)
+                    success, error = await send_sms_sns(phone, message)
     except Exception as e:
         logger.error(f"Delivery error for channel {channel.id}: {e}")
         error = str(e)
@@ -554,7 +692,39 @@ async def test_channel(
         </body>
         </html>
         """
-        return await send_email_ses(emails, subject, html_body)
+
+        # Check if multi-provider configuration exists
+        if "providers" in channel.config_json and channel.config_json.get("providers"):
+            providers = channel.config_json["providers"]
+            primary_provider = channel.config_json.get("primary_provider", "ses")
+
+            # Try primary provider first
+            success = False
+            error = None
+            if primary_provider == "sendgrid" and "sendgrid" in providers:
+                config = providers["sendgrid"]
+                if config.get("enabled", True):
+                    success, error = await send_email_sendgrid(emails, subject, html_body, config)
+            elif primary_provider == "ses" and "ses" in providers:
+                config = providers["ses"]
+                if config.get("enabled", True):
+                    success, error = await send_email_ses(emails, subject, html_body)
+
+            # Try fallback if primary failed
+            if not success:
+                for provider_name, config in providers.items():
+                    if provider_name != primary_provider and config.get("enabled", True):
+                        if provider_name == "sendgrid":
+                            success, error = await send_email_sendgrid(emails, subject, html_body, config)
+                        elif provider_name == "ses":
+                            success, error = await send_email_ses(emails, subject, html_body)
+                        if success:
+                            break
+
+            return success, error
+        else:
+            # Legacy single-provider configuration
+            return await send_email_ses(emails, subject, html_body)
 
     elif channel.channel_type == ChannelType.SMS:
         # Support both 'phone_number' and 'phone' keys for compatibility
@@ -562,6 +732,39 @@ async def test_channel(
         if not phone:
             return False, "No phone number configured"
 
-        return await send_sms_sns(phone, "[MRRPulse Test] Your notification channel is connected!")
+        message = "[MRRPulse Test] Your notification channel is connected!"
+
+        # Check if multi-provider configuration exists
+        if "providers" in channel.config_json and channel.config_json.get("providers"):
+            providers = channel.config_json["providers"]
+            primary_provider = channel.config_json.get("primary_provider", "sns")
+
+            # Try primary provider first
+            success = False
+            error = None
+            if primary_provider == "twilio" and "twilio" in providers:
+                config = providers["twilio"]
+                if config.get("enabled", True):
+                    success, error = await send_sms_twilio(phone, message, config)
+            elif primary_provider == "sns" and "sns" in providers:
+                config = providers["sns"]
+                if config.get("enabled", True):
+                    success, error = await send_sms_sns(phone, message, config)
+
+            # Try fallback if primary failed
+            if not success:
+                for provider_name, config in providers.items():
+                    if provider_name != primary_provider and config.get("enabled", True):
+                        if provider_name == "twilio":
+                            success, error = await send_sms_twilio(phone, message, config)
+                        elif provider_name == "sns":
+                            success, error = await send_sms_sns(phone, message, config)
+                        if success:
+                            break
+
+            return success, error
+        else:
+            # Legacy single-provider configuration
+            return await send_sms_sns(phone, message)
 
     return False, f"Unknown channel type: {channel.channel_type}"

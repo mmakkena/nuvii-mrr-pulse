@@ -16,6 +16,8 @@ from app.schemas import (
     DiscordIntegrationCreate,
     EmailIntegrationCreate,
     SMSIntegrationCreate,
+    MultiProviderEmailCreate,
+    MultiProviderSMSCreate,
 )
 from app.utils.auth import get_current_user
 
@@ -298,6 +300,98 @@ async def configure_sms(
         channel_type=ChannelType.SMS,
         name="SMS",
         config_json={"phone": data.phone_number},
+        enabled=True,
+    )
+    db.add(channel)
+    await db.flush()
+    await db.refresh(channel)
+
+    return channel_to_response(channel)
+
+
+@router.post("/email/multi-provider", response_model=IntegrationResponse)
+async def configure_multi_provider_email(
+    data: MultiProviderEmailCreate,
+    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Configure email notifications with multiple provider support."""
+    workspace = await get_user_workspace(db, current_user, workspace_id)
+
+    # Check if Email channel already exists
+    result = await db.execute(
+        select(NotificationChannel)
+        .where(NotificationChannel.workspace_id == workspace.id)
+        .where(NotificationChannel.channel_type == ChannelType.EMAIL)
+    )
+    existing = result.scalar_one_or_none()
+
+    config = {
+        "emails": data.emails,
+        "primary_provider": data.primary_provider,
+        "providers": data.providers
+    }
+
+    if existing:
+        existing.config_json = config
+        existing.enabled = True
+        existing.updated_at = datetime.utcnow()
+        await db.flush()
+        await db.refresh(existing)
+        return channel_to_response(existing)
+
+    channel = NotificationChannel(
+        workspace_id=workspace.id,
+        channel_type=ChannelType.EMAIL,
+        name="Email",
+        config_json=config,
+        enabled=True,
+    )
+    db.add(channel)
+    await db.flush()
+    await db.refresh(channel)
+
+    return channel_to_response(channel)
+
+
+@router.post("/sms/multi-provider", response_model=IntegrationResponse)
+async def configure_multi_provider_sms(
+    data: MultiProviderSMSCreate,
+    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Configure SMS notifications with multiple provider support."""
+    workspace = await get_user_workspace(db, current_user, workspace_id)
+
+    # Check if SMS channel already exists
+    result = await db.execute(
+        select(NotificationChannel)
+        .where(NotificationChannel.workspace_id == workspace.id)
+        .where(NotificationChannel.channel_type == ChannelType.SMS)
+    )
+    existing = result.scalar_one_or_none()
+
+    config = {
+        "phone_number": data.phone_number,
+        "primary_provider": data.primary_provider,
+        "providers": data.providers
+    }
+
+    if existing:
+        existing.config_json = config
+        existing.enabled = True
+        existing.updated_at = datetime.utcnow()
+        await db.flush()
+        await db.refresh(existing)
+        return channel_to_response(existing)
+
+    channel = NotificationChannel(
+        workspace_id=workspace.id,
+        channel_type=ChannelType.SMS,
+        name="SMS",
+        config_json=config,
         enabled=True,
     )
     db.add(channel)

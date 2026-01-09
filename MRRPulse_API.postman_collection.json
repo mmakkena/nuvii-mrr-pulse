@@ -1,0 +1,1531 @@
+{
+	"info": {
+		"_postman_id": "mrrpulse-api-collection",
+		"name": "MRRPulse API",
+		"description": "Stripe-first alerting and early-warning system for SaaS founders - Complete API Collection",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{access_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "workspace_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Health",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/health",
+							"host": ["{{baseUrl}}"],
+							"path": ["health"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Sign Up",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('access_token', jsonData.tokens.access_token);",
+									"    pm.environment.set('refresh_token', jsonData.tokens.refresh_token);",
+									"    console.log('Tokens saved to environment');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"SecurePassword123!\",\n  \"name\": \"John Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/signup",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "signup"]
+						}
+					}
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('access_token', jsonData.tokens.access_token);",
+									"    pm.environment.set('refresh_token', jsonData.tokens.refresh_token);",
+									"    console.log('Tokens saved to environment');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/login",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "login"]
+						}
+					}
+				},
+				{
+					"name": "Get Current User",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/me",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "me"]
+						}
+					}
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('access_token', jsonData.access_token);",
+									"    pm.environment.set('refresh_token', jsonData.refresh_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/refresh",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "refresh"]
+						}
+					}
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/logout",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "logout"]
+						}
+					}
+				},
+				{
+					"name": "Google OAuth",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"id_token\": \"google_id_token_here\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/google",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "google"]
+						}
+					}
+				},
+				{
+					"name": "Forgot Password",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/forgot-password",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "forgot-password"]
+						}
+					}
+				},
+				{
+					"name": "Reset Password",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"reset_token_from_email\",\n  \"new_password\": \"NewSecurePassword123!\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/reset-password",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "reset-password"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Workspaces",
+			"item": [
+				{
+					"name": "List Workspaces",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    if (jsonData.length > 0) {",
+									"        pm.environment.set('workspace_id', jsonData[0].id);",
+									"        console.log('Workspace ID saved:', jsonData[0].id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/workspaces",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "workspaces"]
+						}
+					}
+				},
+				{
+					"name": "Create Workspace",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"My SaaS Company\",\n  \"slug\": \"my-saas-company\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/workspaces",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "workspaces"]
+						}
+					}
+				},
+				{
+					"name": "Get Workspace",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/workspaces/{{workspace_id}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "workspaces", "{{workspace_id}}"]
+						}
+					}
+				},
+				{
+					"name": "Update Workspace",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Updated Company Name\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/workspaces/{{workspace_id}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "workspaces", "{{workspace_id}}"]
+						}
+					}
+				},
+				{
+					"name": "Invite Member",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"teammate@example.com\",\n  \"role\": \"member\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/workspaces/{{workspace_id}}/members",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "workspaces", "{{workspace_id}}", "members"]
+						}
+					}
+				},
+				{
+					"name": "Update Member Role",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"admin\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/workspaces/{{workspace_id}}/members/:user_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "workspaces", "{{workspace_id}}", "members", ":user_id"],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "user-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Remove Member",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/workspaces/{{workspace_id}}/members/:user_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "workspaces", "{{workspace_id}}", "members", ":user_id"],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "user-uuid"
+								}
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Stripe Connect",
+			"item": [
+				{
+					"name": "Start Stripe Connect",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/stripe/connect/start?workspace_id={{workspace_id}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "stripe", "connect", "start"],
+							"query": [
+								{
+									"key": "workspace_id",
+									"value": "{{workspace_id}}"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Create Test Stripe Account",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/stripe/connect/test?workspace_id={{workspace_id}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "stripe", "connect", "test"],
+							"query": [
+								{
+									"key": "workspace_id",
+									"value": "{{workspace_id}}"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "List Stripe Accounts",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/stripe/accounts?workspace_id={{workspace_id}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "stripe", "accounts"],
+							"query": [
+								{
+									"key": "workspace_id",
+									"value": "{{workspace_id}}"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Stripe Account",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/stripe/accounts/:account_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "stripe", "accounts", ":account_id"],
+							"variable": [
+								{
+									"key": "account_id",
+									"value": "account-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Disconnect Stripe Account",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/stripe/accounts/:account_id/disconnect",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "stripe", "accounts", ":account_id", "disconnect"],
+							"variable": [
+								{
+									"key": "account_id",
+									"value": "account-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Sync Stripe Account",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/stripe/accounts/:account_id/sync",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "stripe", "accounts", ":account_id", "sync"],
+							"variable": [
+								{
+									"key": "account_id",
+									"value": "account-uuid"
+								}
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Webhooks",
+			"item": [
+				{
+					"name": "Stripe Webhook (Connect)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "stripe-signature",
+								"value": "signature_from_stripe"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"id\": \"evt_test\",\n  \"type\": \"charge.succeeded\",\n  \"account\": \"acct_connected_account_id\",\n  \"data\": {}\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/webhooks/stripe",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "webhooks", "stripe"]
+						}
+					}
+				},
+				{
+					"name": "Billing Webhook",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "stripe-signature",
+								"value": "signature_from_stripe"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"id\": \"evt_test\",\n  \"type\": \"customer.subscription.created\",\n  \"data\": {}\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/webhooks/billing",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "webhooks", "billing"]
+						}
+					}
+				},
+				{
+					"name": "List Webhook Events",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/webhooks/events?stripe_account_id=acct_xxx&limit=50&offset=0",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "webhooks", "events"],
+							"query": [
+								{
+									"key": "stripe_account_id",
+									"value": "acct_xxx"
+								},
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Retry Webhook Event",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/webhooks/events/:event_id/retry",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "webhooks", "events", ":event_id", "retry"],
+							"variable": [
+								{
+									"key": "event_id",
+									"value": "event-uuid"
+								}
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Alerts",
+			"item": [
+				{
+					"name": "List Alerts",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/alerts?page=1&page_size=20",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "alerts"],
+							"query": [
+								{
+									"key": "severity",
+									"value": "critical",
+									"disabled": true
+								},
+								{
+									"key": "status",
+									"value": "active",
+									"disabled": true
+								},
+								{
+									"key": "type",
+									"value": "payment_failed",
+									"disabled": true
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "page_size",
+									"value": "20"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Alert",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/alerts/:alert_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "alerts", ":alert_id"],
+							"variable": [
+								{
+									"key": "alert_id",
+									"value": "alert-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Alert Stats",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/alerts/stats",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "alerts", "stats"]
+						}
+					}
+				},
+				{
+					"name": "Acknowledge Alert",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/alerts/:alert_id/acknowledge",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "alerts", ":alert_id", "acknowledge"],
+							"variable": [
+								{
+									"key": "alert_id",
+									"value": "alert-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Acknowledge All Alerts",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/alerts/acknowledge-all",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "alerts", "acknowledge-all"]
+						}
+					}
+				},
+				{
+					"name": "Send Test Alert",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/alerts/test",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "alerts", "test"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Alert Rules",
+			"item": [
+				{
+					"name": "List Rules",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/rules",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "rules"]
+						}
+					}
+				},
+				{
+					"name": "Create Rule",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"payment_failed\",\n  \"name\": \"High Value Payment Failures\",\n  \"description\": \"Alert when payments over $100 fail\",\n  \"conditions\": {\n    \"min_amount\": 100\n  },\n  \"channels\": [\"slack\", \"email\"]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/rules",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "rules"]
+						}
+					}
+				},
+				{
+					"name": "Get Rule",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/rules/:rule_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "rules", ":rule_id"],
+							"variable": [
+								{
+									"key": "rule_id",
+									"value": "rule-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Update Rule",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Updated Rule Name\",\n  \"enabled\": true,\n  \"conditions\": {\n    \"min_amount\": 150\n  }\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/rules/:rule_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "rules", ":rule_id"],
+							"variable": [
+								{
+									"key": "rule_id",
+									"value": "rule-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Delete Rule",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/rules/:rule_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "rules", ":rule_id"],
+							"variable": [
+								{
+									"key": "rule_id",
+									"value": "rule-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Apply Preset (Founder)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/rules/presets/founder",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "rules", "presets", "founder"]
+						}
+					}
+				},
+				{
+					"name": "Apply Preset (Risk)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/rules/presets/risk",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "rules", "presets", "risk"]
+						}
+					}
+				},
+				{
+					"name": "Apply Preset (Team)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/rules/presets/team",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "rules", "presets", "team"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Integrations",
+			"item": [
+				{
+					"name": "List Integrations",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations"]
+						}
+					}
+				},
+				{
+					"name": "Configure Slack",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"webhook_url\": \"https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXX\",\n  \"channel\": \"#alerts\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/slack",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", "slack"]
+						}
+					}
+				},
+				{
+					"name": "Configure Discord",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"webhook_url\": \"https://discord.com/api/webhooks/123456789/abcdefghijk\",\n  \"channel_id\": \"123456789\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/discord",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", "discord"]
+						}
+					}
+				},
+				{
+					"name": "Configure Email",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"emails\": [\"team@example.com\", \"alerts@example.com\"]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/email",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", "email"]
+						}
+					}
+				},
+				{
+					"name": "Configure SMS",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"+1234567890\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/sms",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", "sms"]
+						}
+					}
+				},
+				{
+					"name": "Get Integration",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/:channel_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", ":channel_id"],
+							"variable": [
+								{
+									"key": "channel_id",
+									"value": "channel-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Update Integration",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"webhook_url\": \"https://hooks.slack.com/services/new/webhook/url\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/:channel_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", ":channel_id"],
+							"variable": [
+								{
+									"key": "channel_id",
+									"value": "channel-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Delete Integration",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/:channel_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", ":channel_id"],
+							"variable": [
+								{
+									"key": "channel_id",
+									"value": "channel-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Test Integration",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/:channel_id/test",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", ":channel_id", "test"],
+							"variable": [
+								{
+									"key": "channel_id",
+									"value": "channel-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Escalation - Get Roster",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/escalation/roster",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", "escalation", "roster"]
+						}
+					}
+				},
+				{
+					"name": "Escalation - Add Contact",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"John Doe\",\n  \"phone\": \"+1234567890\",\n  \"timezone\": \"America/New_York\",\n  \"min_amount_threshold\": 500\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/escalation/roster",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", "escalation", "roster"]
+						}
+					}
+				},
+				{
+					"name": "Escalation - Update Contact",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Jane Doe\",\n  \"enabled\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/escalation/roster/:contact_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", "escalation", "roster", ":contact_id"],
+							"variable": [
+								{
+									"key": "contact_id",
+									"value": "contact-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Escalation - Delete Contact",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/integrations/escalation/roster/:contact_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "integrations", "escalation", "roster", ":contact_id"],
+							"variable": [
+								{
+									"key": "contact_id",
+									"value": "contact-uuid"
+								}
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Risk",
+			"item": [
+				{
+					"name": "Get Risk Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/risk/status",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "risk", "status"]
+						}
+					}
+				},
+				{
+					"name": "Get Account Risk Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/risk/status/:account_id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "risk", "status", ":account_id"],
+							"variable": [
+								{
+									"key": "account_id",
+									"value": "account-uuid"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Risk History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/risk/history",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "risk", "history"]
+						}
+					}
+				},
+				{
+					"name": "Get Risk Thresholds",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/risk/thresholds",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "risk", "thresholds"]
+						}
+					}
+				},
+				{
+					"name": "Update Risk Thresholds",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"dispute_rate\": {\n    \"warning\": 0.75,\n    \"critical\": 1.0\n  },\n  \"refund_rate\": {\n    \"warning\": 5.0,\n    \"critical\": 10.0\n  },\n  \"velocity_deviation\": {\n    \"warning\": 200,\n    \"critical\": 300\n  }\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/risk/thresholds",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "risk", "thresholds"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Billing",
+			"item": [
+				{
+					"name": "Get Subscription",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/billing/subscription",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "billing", "subscription"]
+						}
+					}
+				},
+				{
+					"name": "Create Checkout Session",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"plan\": \"pro\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/billing/checkout?plan=pro",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "billing", "checkout"],
+							"query": [
+								{
+									"key": "plan",
+									"value": "pro"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Billing Portal",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/billing/portal",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "billing", "portal"]
+						}
+					}
+				},
+				{
+					"name": "List Invoices",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/billing/invoices",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "billing", "invoices"]
+						}
+					}
+				},
+				{
+					"name": "Get Usage",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Workspace-ID",
+								"value": "{{workspace_id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/billing/usage",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "billing", "usage"]
+						}
+					}
+				}
+			]
+		}
+	]
+}

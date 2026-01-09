@@ -47,6 +47,11 @@ services:
       - SQS_RISK_QUEUE_URL=http://localstack:4566/000000000000/mrrpulse-risk
       - FRONTEND_URL=http://localhost:3000
       - DEBUG=true
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
+      - FROM_EMAIL=${FROM_EMAIL:-alerts@mrrpulse.com}
     ports:
       - "8000:8000"
     depends_on:
