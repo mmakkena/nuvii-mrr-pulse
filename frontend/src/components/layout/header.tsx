@@ -1,16 +1,15 @@
 'use client'
 
-import { Bell, Search, User, Settings, LogOut, UserCircle } from 'lucide-react'
+import { useState } from 'react'
+import { Bell, Search, User, Settings, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import Menu from '@mui/material/Menu'
+import MenuItem from '@mui/material/MenuItem'
+import Typography from '@mui/material/Typography'
+import Box from '@mui/material/Box'
+import Badge from '@mui/material/Badge'
+import Divider from '@mui/material/Divider'
 import { useAuth } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
 
@@ -23,6 +22,9 @@ export function Header({ title, description }: HeaderProps) {
   const { user, logout } = useAuth()
   const router = useRouter()
 
+  const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null)
+  const [userAnchor, setUserAnchor] = useState<null | HTMLElement>(null)
+
   // Mock notifications data
   const notifications = [
     { id: '1', title: 'Payment failed for customer John Doe', time: '5 min ago' },
@@ -30,96 +32,175 @@ export function Header({ title, description }: HeaderProps) {
     { id: '3', title: 'Refund rate threshold exceeded', time: '2 hours ago' },
   ]
 
-  return (
-    <header className="h-16 border-b bg-white flex items-center justify-between px-6">
-      <div>
-        <h1 className="text-xl font-semibold text-slate-900">{title}</h1>
-        {description && (
-          <p className="text-sm text-slate-500">{description}</p>
-        )}
-      </div>
+  const handleNotifClick = (event: React.MouseEvent<HTMLElement>) => {
+    setNotifAnchor(event.currentTarget)
+  }
 
-      <div className="flex items-center gap-4">
+  const handleUserClick = (event: React.MouseEvent<HTMLElement>) => {
+    setUserAnchor(event.currentTarget)
+  }
+
+  const handleNotifClose = () => {
+    setNotifAnchor(null)
+  }
+
+  const handleUserClose = () => {
+    setUserAnchor(null)
+  }
+
+  const handleNotificationClick = () => {
+    router.push('/alerts')
+    handleNotifClose()
+  }
+
+  const handleSettingsClick = () => {
+    router.push('/settings')
+    handleUserClose()
+  }
+
+  const handleLogout = () => {
+    handleUserClose()
+    logout()
+  }
+
+  return (
+    <Box
+      component="header"
+      sx={{
+        height: 64,
+        borderBottom: 1,
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        px: 3,
+      }}
+    >
+      <Box>
+        <Typography variant="h5" fontWeight={600} color="text.primary">
+          {title}
+        </Typography>
+        {description && (
+          <Typography variant="body2" color="text.secondary">
+            {description}
+          </Typography>
+        )}
+      </Box>
+
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
         {/* Search */}
-        <div className="relative hidden md:block">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <Box sx={{ position: 'relative', display: { xs: 'none', md: 'block' } }}>
           <Input
             type="search"
             placeholder="Search alerts..."
-            className="pl-9 w-64"
+            sx={{ width: 256 }}
+            InputProps={{
+              startAdornment: <Search className="w-4 h-4 text-slate-400" style={{ marginRight: 8 }} />,
+            }}
           />
-        </div>
+        </Box>
 
         {/* Notifications */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">
-                {notifications.length}
-              </span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-80">
-            <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {notifications.length > 0 ? (
-              notifications.map((notification) => (
-                <DropdownMenuItem
-                  key={notification.id}
-                  className="cursor-pointer flex flex-col items-start py-3"
-                  onClick={() => router.push('/alerts')}
-                >
-                  <span className="font-medium text-slate-900">{notification.title}</span>
-                  <span className="text-xs text-slate-500">{notification.time}</span>
-                </DropdownMenuItem>
-              ))
-            ) : (
-              <div className="px-2 py-3 text-sm text-slate-500">No new notifications</div>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="cursor-pointer text-blue-600"
-              onClick={() => router.push('/alerts')}
-            >
+        <Button variant="ghost" size="icon" onClick={handleNotifClick}>
+          <Badge badgeContent={notifications.length} color="error">
+            <Bell className="w-5 h-5" />
+          </Badge>
+        </Button>
+        <Menu
+          anchorEl={notifAnchor}
+          open={Boolean(notifAnchor)}
+          onClose={handleNotifClose}
+          anchorOrigin={{
+            vertical: 'bottom',
+            horizontal: 'right',
+          }}
+          transformOrigin={{
+            vertical: 'top',
+            horizontal: 'right',
+          }}
+          PaperProps={{
+            sx: { width: 320, maxWidth: '100%', mt: 1 }
+          }}
+        >
+          <Box sx={{ px: 2, py: 1.5 }}>
+            <Typography variant="body2" fontWeight={600}>
+              Notifications
+            </Typography>
+          </Box>
+          <Divider />
+          {notifications.length > 0 ? (
+            notifications.map((notification) => (
+              <MenuItem
+                key={notification.id}
+                onClick={handleNotificationClick}
+                sx={{ flexDirection: 'column', alignItems: 'flex-start', py: 1.5 }}
+              >
+                <Typography variant="body2" fontWeight={500}>
+                  {notification.title}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {notification.time}
+                </Typography>
+              </MenuItem>
+            ))
+          ) : (
+            <Box sx={{ px: 2, py: 1.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                No new notifications
+              </Typography>
+            </Box>
+          )}
+          <Divider />
+          <MenuItem onClick={handleNotificationClick}>
+            <Typography variant="body2" color="primary">
               View all alerts
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </Typography>
+          </MenuItem>
+        </Menu>
 
         {/* User menu */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon">
-              <User className="w-5 h-5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>
-              <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium leading-none">{user?.name || 'User'}</p>
-                <p className="text-xs leading-none text-slate-500">{user?.email}</p>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="cursor-pointer"
-              onClick={() => router.push('/settings')}
-            >
-              <Settings className="mr-2 h-4 w-4" />
-              <span>Settings</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="cursor-pointer text-red-600"
-              onClick={logout}
-            >
-              <LogOut className="mr-2 h-4 w-4" />
-              <span>Sign out</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </header>
+        <Button variant="ghost" size="icon" onClick={handleUserClick}>
+          <User className="w-5 h-5" />
+        </Button>
+        <Menu
+          anchorEl={userAnchor}
+          open={Boolean(userAnchor)}
+          onClose={handleUserClose}
+          anchorOrigin={{
+            vertical: 'bottom',
+            horizontal: 'right',
+          }}
+          transformOrigin={{
+            vertical: 'top',
+            horizontal: 'right',
+          }}
+          PaperProps={{
+            sx: { width: 224, mt: 1 }
+          }}
+        >
+          <Box sx={{ px: 2, py: 1.5 }}>
+            <Typography variant="body2" fontWeight={500}>
+              {user?.name || 'User'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {user?.email}
+            </Typography>
+          </Box>
+          <Divider />
+          <MenuItem onClick={handleSettingsClick}>
+            <Settings className="mr-2 h-4 w-4" />
+            <Typography variant="body2">Settings</Typography>
+          </MenuItem>
+          <Divider />
+          <MenuItem onClick={handleLogout}>
+            <LogOut className="mr-2 h-4 w-4" />
+            <Typography variant="body2" color="error">
+              Sign out
+            </Typography>
+          </MenuItem>
+        </Menu>
+      </Box>
+    </Box>
   )
 }

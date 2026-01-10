@@ -297,11 +297,13 @@ export default function DashboardPage() {
                   <Bell className="w-4 h-4 mr-2" />
                   Send Test Alert
                 </Button>
-                <Button variant="outline" className="w-full justify-start" asChild>
-                  <a href="https://dashboard.stripe.com" target="_blank" rel="noopener noreferrer">
-                    <CreditCard className="w-4 h-4 mr-2" />
-                    View Stripe Dashboard
-                  </a>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => window.open('https://dashboard.stripe.com', '_blank', 'noopener,noreferrer')}
+                >
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  View Stripe Dashboard
                 </Button>
                 <Link href="/settings">
                   <Button variant="outline" className="w-full justify-start">

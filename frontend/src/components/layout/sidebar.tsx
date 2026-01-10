@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useState } from 'react'
 import {
   LayoutDashboard,
   Bell,
@@ -14,9 +15,15 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
-import { useState } from 'react'
+import Box from '@mui/material/Box'
+import List from '@mui/material/List'
+import ListItem from '@mui/material/ListItem'
+import ListItemButton from '@mui/material/ListItemButton'
+import ListItemIcon from '@mui/material/ListItemIcon'
+import ListItemText from '@mui/material/ListItemText'
+import IconButton from '@mui/material/IconButton'
+import Typography from '@mui/material/Typography'
+import Divider from '@mui/material/Divider'
 import { useAuth } from '@/lib/auth'
 
 const navigation = [
@@ -35,80 +42,132 @@ export function Sidebar() {
   const { logout } = useAuth()
 
   return (
-    <div
-      className={cn(
-        'flex flex-col h-screen bg-slate-900 text-white transition-all duration-300',
-        collapsed ? 'w-16' : 'w-64'
-      )}
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+        bgcolor: '#0f172a',
+        color: 'white',
+        width: collapsed ? 64 : 256,
+        transition: 'width 0.3s',
+      }}
     >
       {/* Logo */}
-      <div className="flex items-center h-16 px-4 border-b border-slate-800">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold">
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          height: 64,
+          px: 2,
+          borderBottom: 1,
+          borderColor: '#1e293b',
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box
+            sx={{
+              width: 32,
+              height: 32,
+              bgcolor: 'primary.main',
+              borderRadius: 1.5,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 'bold',
+            }}
+          >
             M
-          </div>
+          </Box>
           {!collapsed && (
-            <span className="text-lg font-semibold">MRRPulse</span>
+            <Typography variant="h6" fontWeight={600}>
+              MRRPulse
+            </Typography>
           )}
-        </div>
-      </div>
+        </Box>
+      </Box>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-        {navigation.map((item) => {
-          const isActive = pathname === item.href || pathname?.startsWith(item.href + '/')
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              )}
-            >
-              <item.icon className="w-5 h-5 flex-shrink-0" />
-              {!collapsed && <span>{item.name}</span>}
-            </Link>
-          )
-        })}
-      </nav>
+      <Box sx={{ flex: 1, overflowY: 'auto', py: 2, px: 1 }}>
+        <List>
+          {navigation.map((item) => {
+            const isActive = pathname === item.href || pathname?.startsWith(item.href + '/')
+            const Icon = item.icon
+            return (
+              <ListItem key={item.name} disablePadding sx={{ mb: 0.5 }}>
+                <ListItemButton
+                  component={Link}
+                  href={item.href}
+                  sx={{
+                    borderRadius: 2,
+                    color: isActive ? 'white' : '#cbd5e1',
+                    bgcolor: isActive ? 'primary.main' : 'transparent',
+                    '&:hover': {
+                      bgcolor: isActive ? 'primary.dark' : '#1e293b',
+                      color: 'white',
+                    },
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 40, color: 'inherit' }}>
+                    <Icon className="w-5 h-5" />
+                  </ListItemIcon>
+                  {!collapsed && <ListItemText primary={item.name} />}
+                </ListItemButton>
+              </ListItem>
+            )
+          })}
+        </List>
+      </Box>
 
       {/* Collapse toggle */}
-      <div className="p-2 border-t border-slate-800">
-        <Button
-          variant="ghost"
-          size="sm"
+      <Box sx={{ p: 1, borderTop: 1, borderColor: '#1e293b' }}>
+        <IconButton
           onClick={() => setCollapsed(!collapsed)}
-          className="w-full justify-center text-slate-400 hover:text-white hover:bg-slate-800"
+          sx={{
+            width: '100%',
+            color: '#94a3b8',
+            '&:hover': {
+              color: 'white',
+              bgcolor: '#1e293b',
+            },
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            px: collapsed ? 0 : 2,
+          }}
         >
           {collapsed ? (
             <ChevronRight className="w-5 h-5" />
           ) : (
             <>
-              <ChevronLeft className="w-5 h-5 mr-2" />
-              <span>Collapse</span>
+              <ChevronLeft className="w-5 h-5" style={{ marginRight: 8 }} />
+              <Typography variant="body2">Collapse</Typography>
             </>
           )}
-        </Button>
-      </div>
+        </IconButton>
+      </Box>
 
       {/* User section */}
-      <div className="p-4 border-t border-slate-800">
-        <Button
-          variant="ghost"
-          size="sm"
+      <Box sx={{ p: 2, borderTop: 1, borderColor: '#1e293b' }}>
+        <IconButton
           onClick={logout}
-          className={cn(
-            'text-slate-400 hover:text-white hover:bg-slate-800',
-            collapsed ? 'w-full justify-center' : 'w-full justify-start'
-          )}
+          sx={{
+            width: '100%',
+            color: '#94a3b8',
+            '&:hover': {
+              color: 'white',
+              bgcolor: '#1e293b',
+            },
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            px: collapsed ? 0 : 2,
+          }}
         >
           <LogOut className="w-5 h-5" />
-          {!collapsed && <span className="ml-2">Sign out</span>}
-        </Button>
-      </div>
-    </div>
+          {!collapsed && (
+            <Typography variant="body2" sx={{ ml: 1 }}>
+              Sign out
+            </Typography>
+          )}
+        </IconButton>
+      </Box>
+    </Box>
   )
 }

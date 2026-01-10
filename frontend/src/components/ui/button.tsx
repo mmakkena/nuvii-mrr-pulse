@@ -1,51 +1,87 @@
 import * as React from 'react'
-import { Slot } from '@radix-ui/react-slot'
-import { cva, type VariantProps } from 'class-variance-authority'
+import MuiButton, { ButtonProps as MuiButtonProps } from '@mui/material/Button'
+import IconButton, { IconButtonProps } from '@mui/material/IconButton'
 
-import { cn } from '@/lib/utils'
-
-const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
-  {
-    variants: {
-      variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        destructive:
-          'bg-destructive text-destructive-foreground hover:bg-destructive/90',
-        outline:
-          'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-        secondary:
-          'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        ghost: 'hover:bg-accent hover:text-accent-foreground',
-        link: 'text-primary underline-offset-4 hover:underline',
-      },
-      size: {
-        default: 'h-10 px-4 py-2',
-        sm: 'h-9 rounded-md px-3',
-        lg: 'h-11 rounded-md px-8',
-        icon: 'h-10 w-10',
-      },
-    },
-    defaultVariants: {
-      variant: 'default',
-      size: 'default',
-    },
-  }
-)
-
-export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
-  asChild?: boolean
+export interface ButtonProps extends Omit<MuiButtonProps, 'variant' | 'size'> {
+  variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link'
+  size?: 'default' | 'sm' | 'lg' | 'icon'
+  className?: string
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
-    const Comp = asChild ? Slot : 'button'
+  ({ variant = 'default', size = 'default', sx, className, ...props }, ref) => {
+    // Map custom variants to MUI variants
+    const getMuiVariant = (): MuiButtonProps['variant'] => {
+      switch (variant) {
+        case 'default':
+          return 'contained'
+        case 'outline':
+          return 'outlined'
+        case 'ghost':
+        case 'link':
+          return 'text'
+        case 'destructive':
+          return 'contained'
+        case 'secondary':
+          return 'contained'
+        default:
+          return 'contained'
+      }
+    }
+
+    // Map custom sizes to MUI sizes
+    const getMuiSize = (): MuiButtonProps['size'] => {
+      switch (size) {
+        case 'sm':
+          return 'small'
+        case 'lg':
+          return 'large'
+        case 'default':
+        case 'icon':
+          return 'medium'
+        default:
+          return 'medium'
+      }
+    }
+
+    // Handle icon size separately
+    if (size === 'icon') {
+      return (
+        <IconButton
+          ref={ref as React.Ref<HTMLButtonElement>}
+          size="medium"
+          className={className}
+          sx={{
+            ...sx,
+          }}
+          {...(props as IconButtonProps)}
+        />
+      )
+    }
+
     return (
-      <Comp
-        className={cn(buttonVariants({ variant, size, className }))}
+      <MuiButton
         ref={ref}
+        variant={getMuiVariant()}
+        size={getMuiSize()}
+        color={variant === 'destructive' ? 'error' : variant === 'secondary' ? 'secondary' : 'primary'}
+        className={className}
+        sx={{
+          textTransform: 'none',
+          fontWeight: 500,
+          ...(variant === 'ghost' && {
+            '&:hover': {
+              backgroundColor: 'action.hover',
+            },
+          }),
+          ...(variant === 'link' && {
+            textDecoration: 'underline',
+            '&:hover': {
+              textDecoration: 'underline',
+            },
+          }),
+          ...sx,
+        }}
         {...props}
       />
     )
@@ -53,4 +89,4 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 )
 Button.displayName = 'Button'
 
-export { Button, buttonVariants }
+export { Button }

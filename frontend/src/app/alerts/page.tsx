@@ -269,11 +269,13 @@ export default function AlertsPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           {alert.stripe_url && (
-                            <Button variant="outline" size="sm" asChild>
-                              <a href={alert.stripe_url} target="_blank" rel="noopener noreferrer">
-                                <ExternalLink className="w-4 h-4 mr-1" />
-                                View in Stripe
-                              </a>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => alert.stripe_url && window.open(alert.stripe_url, '_blank', 'noopener,noreferrer')}
+                            >
+                              <ExternalLink className="w-4 h-4 mr-1" />
+                              View in Stripe
                             </Button>
                           )}
                           {alert.status === 'active' && (
