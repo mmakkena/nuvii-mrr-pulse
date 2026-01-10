@@ -17,6 +17,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
+import { useAuth } from '@/lib/auth'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -31,6 +32,7 @@ const navigation = [
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const { logout } = useAuth()
 
   return (
     <div
@@ -97,6 +99,7 @@ export function Sidebar() {
         <Button
           variant="ghost"
           size="sm"
+          onClick={logout}
           className={cn(
             'text-slate-400 hover:text-white hover:bg-slate-800',
             collapsed ? 'w-full justify-center' : 'w-full justify-start'
