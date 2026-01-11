@@ -431,3 +431,135 @@ async def create_subscription_created_alert(
         body=body,
         metadata=metadata,
     )
+
+
+# Risk threshold alerts
+
+async def create_dispute_rate_warning_alert(
+    db: AsyncSession,
+    account: StripeAccount,
+    current_rate: Decimal,
+    disputes_count: int,
+    charges_count: int,
+) -> Alert:
+    """Create alert when dispute rate exceeds warning threshold (0.75%)."""
+    rate_percent = float(current_rate) * 100
+
+    title = f"Dispute Rate Warning: {rate_percent:.2f}%"
+    body = (
+        f"Your 30-day dispute rate has reached {rate_percent:.2f}%, "
+        f"exceeding the 0.75% warning threshold. "
+        f"You have {disputes_count} disputes out of {charges_count} charges. "
+        f"Stripe may take action at 1.0%."
+    )
+
+    return await create_alert(
+        db=db,
+        workspace_id=account.workspace_id,
+        stripe_account_id=account.id,
+        alert_type=AlertType.DISPUTE_RATE_WARNING,
+        severity=AlertSeverity.WARNING,
+        title=title,
+        body=body,
+        metadata={
+            "dispute_rate": rate_percent,
+            "disputes_count": disputes_count,
+            "charges_count": charges_count,
+        },
+    )
+
+
+async def create_dispute_rate_critical_alert(
+    db: AsyncSession,
+    account: StripeAccount,
+    current_rate: Decimal,
+    disputes_count: int,
+    charges_count: int,
+) -> Alert:
+    """Create alert when dispute rate exceeds critical threshold (1.0%)."""
+    rate_percent = float(current_rate) * 100
+
+    title = f"CRITICAL: Dispute Rate at {rate_percent:.2f}%"
+    body = (
+        f"Your 30-day dispute rate has reached {rate_percent:.2f}%, "
+        f"exceeding Stripe's 1.0% threshold. "
+        f"You have {disputes_count} disputes out of {charges_count} charges. "
+        f"Immediate action is required to prevent account restrictions."
+    )
+
+    return await create_alert(
+        db=db,
+        workspace_id=account.workspace_id,
+        stripe_account_id=account.id,
+        alert_type=AlertType.DISPUTE_RATE_CRITICAL,
+        severity=AlertSeverity.CRITICAL,
+        title=title,
+        body=body,
+        metadata={
+            "dispute_rate": rate_percent,
+            "disputes_count": disputes_count,
+            "charges_count": charges_count,
+        },
+    )
+
+
+async def create_velocity_spike_alert(
+    db: AsyncSession,
+    account: StripeAccount,
+    velocity_score: Decimal,
+    baseline: Decimal,
+    current_rate: int,
+) -> Alert:
+    """Create alert when payment velocity exceeds threshold."""
+    deviation = (float(velocity_score) - 1.0) * 100
+    severity = AlertSeverity.CRITICAL if velocity_score >= Decimal("3.0") else AlertSeverity.WARNING
+
+    title = f"Velocity Spike: {deviation:.0f}% above baseline"
+    body = (
+        f"Payment velocity is {float(velocity_score):.1f}x your baseline rate. "
+        f"Current: {current_rate}/hour, Baseline: {float(baseline):.1f}/hour. "
+        f"This could indicate fraudulent activity or a payment processing issue."
+    )
+
+    return await create_alert(
+        db=db,
+        workspace_id=account.workspace_id,
+        stripe_account_id=account.id,
+        alert_type=AlertType.VELOCITY_SPIKE,
+        severity=severity,
+        title=title,
+        body=body,
+        metadata={
+            "velocity_score": float(velocity_score),
+            "baseline": float(baseline),
+            "current_rate": current_rate,
+        },
+    )
+
+
+async def create_refund_burst_alert(
+    db: AsyncSession,
+    account: StripeAccount,
+    refund_count: int,
+    window_minutes: int,
+) -> Alert:
+    """Create alert when refund burst is detected."""
+    title = f"Refund Burst: {refund_count} refunds in {window_minutes} minutes"
+    body = (
+        f"Detected {refund_count} refunds in the last {window_minutes} minutes. "
+        f"This may indicate a product issue, fraud, or customer service problem."
+    )
+
+    return await create_alert(
+        db=db,
+        workspace_id=account.workspace_id,
+        stripe_account_id=account.id,
+        alert_type=AlertType.REFUND_SPIKE,
+        severity=AlertSeverity.WARNING,
+        title=title,
+        body=body,
+        metadata={
+            "refund_count": refund_count,
+            "window_minutes": window_minutes,
+        },
+    )

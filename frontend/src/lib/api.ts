@@ -335,23 +335,9 @@ export const billingApi = {
     fetchApi<{ portal_url: string }>('/api/billing/portal', { token }),
 }
 
-// Dashboard API (computed)
+// Dashboard API
 export const dashboardApi = {
-  getStats: async (): Promise<DashboardStats> => {
-    const riskStatus = await riskApi.getStatus()
-    // Return stats combining risk data with mock revenue data
-    // In production, this would come from a dedicated dashboard endpoint
-    return {
-      monthly_revenue: 4523000, // cents
-      monthly_revenue_change: 12.5,
-      active_subscriptions: 2847,
-      subscriptions_change: 3.2,
-      failed_payments: 23,
-      failed_payments_change: -8.1,
-      dispute_rate: riskStatus.dispute_rate.current,
-      dispute_rate_change: riskStatus.dispute_rate.current - riskStatus.dispute_rate.previous,
-    }
-  },
+  getStats: (): Promise<DashboardStats> => fetchApi<DashboardStats>('/api/dashboard/stats'),
 }
 
 export { ApiError }

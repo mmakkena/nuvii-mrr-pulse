@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime
 from typing import Optional
@@ -11,7 +12,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import StripeAccount, StripeEvent
 from app.models.stripe_account import StripeEventStatus
-from app.services import alert_service
+from app.services import alert_service, risk_service, metrics_service
 
 router = APIRouter()
 
@@ -173,7 +174,7 @@ async def process_event(
 # Event handlers
 async def handle_payment_succeeded(db: AsyncSession, account: StripeAccount, data: dict):
     """Handle successful payment."""
-    # Future: Update metrics, create success alert if high value
+    # Payment intents don't directly update risk (charges do)
     pass
 
 
@@ -183,38 +184,70 @@ async def handle_payment_failed(db: AsyncSession, account: StripeAccount, data: 
 
 
 async def handle_charge_succeeded(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle successful charge."""
-    # Future: Update revenue metrics
-    pass
+    """Handle successful charge - updates risk metrics and revenue."""
+    amount = data.get("amount", 0)
+    timestamp = datetime.fromtimestamp(data.get("created", datetime.utcnow().timestamp()))
+
+    await asyncio.gather(
+        risk_service.update_risk_for_charge_succeeded(db, account, data),
+        metrics_service.record_successful_charge(db, account.id, amount, timestamp),
+    )
 
 
 async def handle_charge_failed(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle failed charge."""
-    await alert_service.create_charge_failed_alert(db, account, data)
+    """Handle failed charge - updates velocity metrics and failure count."""
+    timestamp = datetime.fromtimestamp(data.get("created", datetime.utcnow().timestamp()))
+
+    await asyncio.gather(
+        alert_service.create_charge_failed_alert(db, account, data),
+        risk_service.update_risk_for_charge_failed(db, account, data),
+        metrics_service.record_failed_charge(db, account.id, timestamp),
+    )
 
 
 async def handle_charge_refunded(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle refund."""
-    # Get the refund data from the charge
+    """Handle refund - updates refund burst detection and metrics."""
     refunds = data.get("refunds", {}).get("data", [])
     refund = refunds[0] if refunds else None
-    await alert_service.create_refund_alert(db, account, data, refund)
+
+    # Get refund amount and timestamp
+    refund_amount = refund.get("amount", 0) if refund else data.get("amount_refunded", 0)
+    timestamp = datetime.fromtimestamp(
+        refund.get("created", data.get("created", datetime.utcnow().timestamp())) if refund else data.get("created", datetime.utcnow().timestamp())
+    )
+
+    await asyncio.gather(
+        alert_service.create_refund_alert(db, account, data, refund),
+        risk_service.update_risk_for_refund(db, account, data, refund),
+        metrics_service.record_refund(db, account.id, refund_amount, timestamp),
+    )
 
 
 async def handle_dispute_created(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle new dispute."""
-    await alert_service.create_dispute_alert(db, account, data)
+    """Handle new dispute - updates dispute rate and metrics."""
+    timestamp = datetime.fromtimestamp(data.get("created", datetime.utcnow().timestamp()))
+
+    await asyncio.gather(
+        alert_service.create_dispute_alert(db, account, data),
+        risk_service.update_risk_for_dispute_created(db, account, data),
+        metrics_service.record_dispute(db, account.id, timestamp),
+    )
 
 
 async def handle_dispute_closed(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle dispute closure."""
-    # Future: Create resolution alert
-    pass
+    """Handle dispute closure - updates dispute metrics."""
+    await risk_service.update_risk_for_dispute_closed(db, account, data)
 
 
 async def handle_subscription_created(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle new subscription."""
-    await alert_service.create_subscription_created_alert(db, account, data)
+    """Handle new subscription - updates MRR and subscription count."""
+    timestamp = datetime.fromtimestamp(data.get("created", datetime.utcnow().timestamp()))
+    mrr_amount = metrics_service.calculate_mrr_from_subscription(data)
+
+    await asyncio.gather(
+        alert_service.create_subscription_created_alert(db, account, data),
+        metrics_service.record_subscription_created(db, account.id, mrr_amount, timestamp),
+    )
 
 
 async def handle_subscription_updated(db: AsyncSession, account: StripeAccount, data: dict):
@@ -224,13 +257,25 @@ async def handle_subscription_updated(db: AsyncSession, account: StripeAccount, 
 
 
 async def handle_subscription_deleted(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle subscription cancellation."""
-    await alert_service.create_subscription_cancelled_alert(db, account, data)
+    """Handle subscription cancellation - updates MRR and cancellation count."""
+    timestamp = datetime.fromtimestamp(data.get("canceled_at") or data.get("created", datetime.utcnow().timestamp()))
+    mrr_amount = metrics_service.calculate_mrr_from_subscription(data)
+
+    await asyncio.gather(
+        alert_service.create_subscription_cancelled_alert(db, account, data),
+        metrics_service.record_subscription_cancelled(db, account.id, mrr_amount, timestamp),
+    )
 
 
 async def handle_invoice_paid(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle paid invoice."""
-    # Future: Update revenue, MRR calculations
+    """Handle paid invoice - updates revenue."""
+    # Invoice payments are already tracked via charges, but we can track them separately too
+    amount = data.get("amount_paid", 0)
+    if amount > 0:
+        timestamp = datetime.fromtimestamp(data.get("status_transitions", {}).get("paid_at") or data.get("created", datetime.utcnow().timestamp()))
+        # Note: This is already tracked in charge.succeeded, so we skip to avoid double-counting
+        # await metrics_service.record_successful_charge(db, account.id, amount, timestamp)
+        logger.info(f"Invoice paid: ${amount / 100} (already tracked in charge.succeeded)")
     pass
 
 
@@ -240,14 +285,16 @@ async def handle_invoice_payment_failed(db: AsyncSession, account: StripeAccount
 
 
 async def handle_payout_paid(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle successful payout."""
-    # Future: Update payout health
-    pass
+    """Handle successful payout - updates payout health."""
+    await risk_service.update_risk_for_payout(db, account, data, success=True)
 
 
 async def handle_payout_failed(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle failed payout."""
-    await alert_service.create_payout_failed_alert(db, account, data)
+    """Handle failed payout - updates payout health."""
+    await asyncio.gather(
+        alert_service.create_payout_failed_alert(db, account, data),
+        risk_service.update_risk_for_payout(db, account, data, success=False),
+    )
 
 
 async def handle_account_updated(db: AsyncSession, account: StripeAccount, data: dict):

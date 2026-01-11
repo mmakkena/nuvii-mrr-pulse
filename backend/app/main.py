@@ -41,7 +41,7 @@ async def health_check():
 
 
 # Import and include routers
-from app.api import auth, workspaces, stripe_connect, webhooks, alerts, rules, integrations, risk, billing
+from app.api import auth, workspaces, stripe_connect, webhooks, alerts, rules, integrations, risk, billing, dashboard
 
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(workspaces.router, prefix="/api/workspaces", tags=["Workspaces"])
@@ -52,3 +52,4 @@ app.include_router(rules.router, prefix="/api/rules", tags=["Alert Rules"])
 app.include_router(integrations.router, prefix="/api/integrations", tags=["Integrations"])
 app.include_router(risk.router, prefix="/api/risk", tags=["Risk"])
 app.include_router(billing.router, prefix="/api/billing", tags=["Billing"])
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
