@@ -29,11 +29,20 @@ out/
 *.swo
 *~
 
-# Environment
+# Environment - all .env files except .env.example
 .env
 .env.local
+.env.production
+.env.development
+.env.test
 .env.*.local
-*.env
+**/.env
+**/.env.local
+**/.env.production
+**/.env.development
+**/.env.test
+!.env.example
+!**/.env.example
 
 # Database
 *.db
@@ -62,6 +71,15 @@ htmlcov/
 # Misc
 *.bak
 *.tmp
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+**/terraform.tfstate
+**/terraform.tfstate.*
+**/tfplan
+**/terraform-trace.log
+**/.terraform.tfstate.lock.info
 
 .playwright/
 .playwright-mcp/

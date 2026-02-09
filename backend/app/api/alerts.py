@@ -1,4 +1,7 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query, HTTPException, Header
+from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -15,6 +18,10 @@ from app.schemas import (
     AlertType as SchemaAlertType,
 )
 from app.utils.auth import get_current_user
+
+
+class ResolveAlertRequest(BaseModel):
+    reason: str = "Manually resolved"
 
 router = APIRouter()
 
@@ -71,6 +78,7 @@ def map_status(db_status: DBAlertStatus) -> AlertStatus:
         DBAlertStatus.SENT: AlertStatus.active,
         DBAlertStatus.ACKNOWLEDGED: AlertStatus.acknowledged,
         DBAlertStatus.FAILED: AlertStatus.active,
+        DBAlertStatus.RESOLVED: AlertStatus.resolved,
     }
     return mapping.get(db_status, AlertStatus.active)
 
@@ -285,6 +293,44 @@ async def acknowledge_alert(
         raise HTTPException(status_code=404, detail="Alert not found")
 
     alert.status = DBAlertStatus.ACKNOWLEDGED
+    await db.flush()
+    await db.refresh(alert)
+
+    return alert_to_response(alert)
+
+
+@router.post("/{alert_id}/resolve", response_model=AlertResponse)
+async def resolve_alert(
+    alert_id: str,
+    data: ResolveAlertRequest,
+    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Resolve an alert with a custom reason."""
+    workspace = await get_user_workspace(db, current_user, workspace_id)
+
+    try:
+        alert_uuid = UUID(alert_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid alert ID format")
+
+    result = await db.execute(
+        select(Alert)
+        .where(Alert.id == alert_uuid)
+        .where(Alert.workspace_id == workspace.id)
+    )
+    alert = result.scalar()
+
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    if alert.status == DBAlertStatus.RESOLVED:
+        raise HTTPException(status_code=400, detail="Alert is already resolved")
+
+    alert.status = DBAlertStatus.RESOLVED
+    alert.resolved_at = datetime.utcnow()
+    alert.resolution_reason = data.reason
     await db.flush()
     await db.refresh(alert)
 

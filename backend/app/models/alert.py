@@ -35,6 +35,7 @@ class AlertStatus(str, Enum):
     SENT = "sent"
     FAILED = "failed"
     ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
 
 
 class DeliveryStatus(str, Enum):
@@ -94,6 +95,10 @@ class Alert(Base):
     status: Mapped[AlertStatus] = mapped_column(
         SQLEnum(AlertStatus), default=AlertStatus.PENDING
     )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolution_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )

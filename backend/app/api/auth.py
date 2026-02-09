@@ -1,5 +1,8 @@
 import uuid
-from datetime import datetime, timedelta
+import random
+import string
+import re
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
@@ -8,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import User
+from app.models.workspace import Workspace, WorkspacePlan, WorkspaceMember, WorkspaceRole
 from app.schemas import (
     UserCreate,
     UserLogin,
@@ -25,8 +29,30 @@ from app.utils.auth import (
     get_current_user,
 )
 from app.config import settings
+from app.services.email_service import send_otp_email, send_welcome_email
 
 router = APIRouter()
+
+# OTP expiry time in minutes
+OTP_EXPIRY_MINUTES = 10
+
+
+def utc_now() -> datetime:
+    """Get current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
+
+
+def generate_otp() -> str:
+    """Generate a 6-digit OTP code."""
+    return ''.join(random.choices(string.digits, k=6))
+
+
+def generate_workspace_slug(name: str, user_id: uuid.UUID) -> str:
+    """Generate a unique workspace slug from name."""
+    slug = name.lower()
+    slug = re.sub(r'[^a-z0-9]+', '-', slug)
+    slug = slug.strip('-')
+    return f"{slug}-{str(user_id)[:8]}"
 
 
 # Additional schemas for auth
@@ -50,6 +76,7 @@ def user_to_response(user: User) -> UserResponse:
         name=user.name,
         avatar_url=user.avatar_url,
         email_verified=user.email_verified,
+        roles=user.roles or ["user"],
         created_at=user.created_at,
     )
 
@@ -66,28 +93,150 @@ def create_password_reset_token(user_id: uuid.UUID) -> str:
     return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-@router.post("/signup", response_model=AuthResponse)
+class VerifyOtpRequest(BaseModel):
+    email: EmailStr
+    otp: str
+
+
+class ResendOtpRequest(BaseModel):
+    email: EmailStr
+
+
+class SignupResponse(BaseModel):
+    message: str
+    email: str
+    requires_verification: bool = True
+
+
+@router.post("/signup", response_model=SignupResponse)
 async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """Register a new user with email and password."""
+    """Register a new user with email and password. Sends OTP for verification."""
     result = await db.execute(select(User).where(User.email == data.email))
     existing_user = result.scalar_one_or_none()
 
     if existing_user:
+        # If user exists but email not verified, allow re-registration (resend OTP)
+        if not existing_user.email_verified:
+            otp_code = generate_otp()
+            existing_user.otp_code = otp_code
+            existing_user.otp_expires_at = utc_now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+            existing_user.password_hash = hash_password(data.password)
+            existing_user.name = data.name
+            await db.commit()
+
+            # Send OTP email
+            await send_otp_email(existing_user.email, otp_code, existing_user.name)
+
+            return SignupResponse(
+                message="Verification code sent to your email",
+                email=data.email,
+                requires_verification=True,
+            )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered",
         )
 
+    # Generate OTP
+    otp_code = generate_otp()
+
+    # Create user (not verified yet)
     user = User(
         email=data.email,
         password_hash=hash_password(data.password),
         name=data.name,
         email_verified=False,
+        otp_code=otp_code,
+        otp_expires_at=utc_now() + timedelta(minutes=OTP_EXPIRY_MINUTES),
     )
     db.add(user)
+    await db.flush()
+    await db.refresh(user)
+
+    # Create default workspace for the user
+    workspace_name = data.workspace_name if data.workspace_name else f"{data.name}'s Workspace"
+    workspace = Workspace(
+        name=workspace_name,
+        slug=generate_workspace_slug(workspace_name, user.id),
+        owner_id=user.id,
+        plan=WorkspacePlan.STARTER,
+    )
+    db.add(workspace)
+    await db.flush()
+    await db.refresh(workspace)
+
+    # Add user as workspace owner
+    member = WorkspaceMember(
+        workspace_id=workspace.id,
+        user_id=user.id,
+        role=WorkspaceRole.OWNER,
+        invited_at=utc_now(),
+        joined_at=utc_now(),
+    )
+    db.add(member)
+
+    await db.commit()
+
+    # Send OTP email
+    await send_otp_email(user.email, otp_code, user.name)
+
+    return SignupResponse(
+        message="Account created! Please check your email for the verification code",
+        email=data.email,
+        requires_verification=True,
+    )
+
+
+@router.post("/verify-otp", response_model=AuthResponse)
+async def verify_otp(data: VerifyOtpRequest, db: AsyncSession = Depends(get_db)):
+    """Verify OTP code and complete registration."""
+    result = await db.execute(select(User).where(User.email == data.email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already verified",
+        )
+
+    if not user.otp_code or not user.otp_expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No verification code found. Please request a new one.",
+        )
+
+    if utc_now() > user.otp_expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code has expired. Please request a new one.",
+        )
+
+    if user.otp_code != data.otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code",
+        )
+
+    # Mark email as verified and clear OTP
+    user.email_verified = True
+    user.otp_code = None
+    user.otp_expires_at = None
+    user.updated_at = datetime.utcnow()
+
     await db.commit()
     await db.refresh(user)
 
+    # Send welcome email (non-blocking)
+    await send_welcome_email(user.email, user.name)
+
+    # Create tokens and return auth response
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token(user.id)
 
@@ -98,6 +247,35 @@ async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
             refresh_token=refresh_token,
         ),
     )
+
+
+@router.post("/resend-otp")
+async def resend_otp(data: ResendOtpRequest, db: AsyncSession = Depends(get_db)):
+    """Resend OTP verification code."""
+    result = await db.execute(select(User).where(User.email == data.email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        # Don't reveal if email exists or not
+        return {"message": "If your email is registered, a verification code has been sent."}
+
+    if user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already verified",
+        )
+
+    # Generate new OTP
+    otp_code = generate_otp()
+    user.otp_code = otp_code
+    user.otp_expires_at = utc_now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+
+    await db.commit()
+
+    # Send OTP email
+    await send_otp_email(user.email, otp_code, user.name)
+
+    return {"message": "If your email is registered, a verification code has been sent."}
 
 
 @router.post("/login", response_model=AuthResponse)

@@ -14,6 +14,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ShieldCheck,
 } from 'lucide-react'
 import Box from '@mui/material/Box'
 import List from '@mui/material/List'
@@ -36,10 +37,15 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
+const adminNavigation = [
+  { name: 'Admin', href: '/admin', icon: ShieldCheck },
+]
+
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
-  const { logout } = useAuth()
+  const { logout, hasRole } = useAuth()
+  const isAdmin = hasRole('admin')
 
   return (
     <Box
@@ -117,6 +123,41 @@ export function Sidebar() {
             )
           })}
         </List>
+
+        {/* Admin Navigation - only visible to admins */}
+        {isAdmin && (
+          <>
+            <Divider sx={{ my: 2, borderColor: '#1e293b' }} />
+            <List>
+              {adminNavigation.map((item) => {
+                const isActive = pathname === item.href || pathname?.startsWith(item.href + '/')
+                const Icon = item.icon
+                return (
+                  <ListItem key={item.name} disablePadding sx={{ mb: 0.5 }}>
+                    <ListItemButton
+                      component={Link}
+                      href={item.href}
+                      sx={{
+                        borderRadius: 2,
+                        color: isActive ? 'white' : '#fbbf24',
+                        bgcolor: isActive ? '#7c3aed' : 'transparent',
+                        '&:hover': {
+                          bgcolor: isActive ? '#6d28d9' : '#1e293b',
+                          color: 'white',
+                        },
+                      }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 40, color: 'inherit' }}>
+                        <Icon className="w-5 h-5" />
+                      </ListItemIcon>
+                      {!collapsed && <ListItemText primary={item.name} />}
+                    </ListItemButton>
+                  </ListItem>
+                )
+              })}
+            </List>
+          </>
+        )}
       </Box>
 
       {/* Collapse toggle */}

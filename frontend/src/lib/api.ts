@@ -12,6 +12,32 @@ class ApiError extends Error {
   }
 }
 
+function extractErrorMessage(detail: unknown): string {
+  // Handle string detail
+  if (typeof detail === 'string') {
+    return detail
+  }
+
+  // Handle Pydantic validation errors (array of objects with 'msg' field)
+  if (Array.isArray(detail) && detail.length > 0) {
+    const firstError = detail[0]
+    if (firstError && typeof firstError === 'object' && 'msg' in firstError) {
+      return String(firstError.msg)
+    }
+    // Try to get any string representation
+    if (firstError && typeof firstError === 'object' && 'message' in firstError) {
+      return String(firstError.message)
+    }
+  }
+
+  // Handle object with message field
+  if (detail && typeof detail === 'object' && 'message' in detail) {
+    return String((detail as { message: unknown }).message)
+  }
+
+  return 'Request failed'
+}
+
 function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null
   return localStorage.getItem('access_token')
@@ -58,7 +84,7 @@ async function fetchApi<T>(
       throw new ApiError(response.status, 'Not authorized')
     }
 
-    throw new ApiError(response.status, error.detail || 'Request failed')
+    throw new ApiError(response.status, extractErrorMessage(error.detail))
   }
 
   return response.json()
@@ -167,10 +193,47 @@ export interface DashboardStats {
 
 // === API Functions ===
 
+// Auth API types
+export interface SignupResponse {
+  message: string
+  email: string
+  requires_verification: boolean
+}
+
+export interface VerifyOtpResponse {
+  user: {
+    id: string
+    email: string
+    name: string
+    avatar_url: string | null
+    email_verified: boolean
+    roles: string[]
+    created_at: string
+  }
+  tokens: {
+    access_token: string
+    refresh_token: string
+  }
+}
+
 // Auth API
 export const authApi = {
   signup: (data: { email: string; password: string; name: string }) =>
-    fetchApi('/api/auth/signup', { method: 'POST', body: JSON.stringify(data), skipAuth: true }),
+    fetchApi<SignupResponse>('/api/auth/signup', { method: 'POST', body: JSON.stringify(data), skipAuth: true }),
+
+  verifyOtp: (data: { email: string; otp: string }) =>
+    fetchApi<VerifyOtpResponse>('/api/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      skipAuth: true,
+    }),
+
+  resendOtp: (email: string) =>
+    fetchApi<{ message: string }>('/api/auth/resend-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+      skipAuth: true,
+    }),
 
   login: (data: { email: string; password: string }) =>
     fetchApi<{ user: any; tokens: { access_token: string; refresh_token: string } }>('/api/auth/login', {
@@ -186,6 +249,20 @@ export const authApi = {
     fetchApi<{ access_token: string }>('/api/auth/refresh', {
       method: 'POST',
       body: JSON.stringify({ refresh_token: refreshToken }),
+      skipAuth: true,
+    }),
+
+  requestPasswordReset: (email: string) =>
+    fetchApi<{ message: string }>('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+      skipAuth: true,
+    }),
+
+  resetPassword: (token: string, newPassword: string) =>
+    fetchApi<{ message: string }>('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password: newPassword }),
       skipAuth: true,
     }),
 }
@@ -317,6 +394,53 @@ export const integrationsApi = {
 
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/integrations/${id}`, { method: 'DELETE' }),
+
+  configureEmail: (emails: string[]) =>
+    fetchApi<Integration>('/api/integrations/email', {
+      method: 'POST',
+      body: JSON.stringify({ emails }),
+    }),
+
+  configureSlack: (webhookUrl: string, channel: string) =>
+    fetchApi<Integration>('/api/integrations/slack', {
+      method: 'POST',
+      body: JSON.stringify({ webhook_url: webhookUrl, channel }),
+    }),
+
+  configureSMS: (phoneNumber: string) =>
+    fetchApi<Integration>('/api/integrations/sms', {
+      method: 'POST',
+      body: JSON.stringify({ phone_number: phoneNumber }),
+    }),
+}
+
+// Stripe Connect API
+export const stripeConnectApi = {
+  startConnect: (workspaceId: string) =>
+    fetchApi<{ authorization_url: string; state: string }>(
+      `/api/stripe/connect/start?workspace_id=${workspaceId}`
+    ),
+
+  listAccounts: (workspaceId: string) =>
+    fetchApi<StripeAccountResponse[]>(`/api/stripe/accounts?workspace_id=${workspaceId}`),
+
+  getAccount: (accountId: string) =>
+    fetchApi<StripeAccountResponse>(`/api/stripe/accounts/${accountId}`),
+
+  disconnectAccount: (accountId: string) =>
+    fetchApi<{ message: string }>(`/api/stripe/accounts/${accountId}/disconnect`, {
+      method: 'POST',
+    }),
+
+  syncAccount: (accountId: string) =>
+    fetchApi<StripeAccountResponse>(`/api/stripe/accounts/${accountId}/sync`, {
+      method: 'POST',
+    }),
+
+  createTestAccount: (workspaceId: string) =>
+    fetchApi<StripeAccountResponse>(`/api/stripe/connect/test?workspace_id=${workspaceId}`, {
+      method: 'POST',
+    }),
 }
 
 // Billing API
@@ -338,6 +462,101 @@ export const billingApi = {
 // Dashboard API
 export const dashboardApi = {
   getStats: (): Promise<DashboardStats> => fetchApi<DashboardStats>('/api/dashboard/stats'),
+}
+
+// Convenience exports for direct function access
+export const requestPasswordReset = authApi.requestPasswordReset
+export const resetPassword = authApi.resetPassword
+
+// === Admin Types ===
+
+export interface PlatformStats {
+  total_users: number
+  total_workspaces: number
+  total_stripe_accounts: number
+  total_alerts: number
+}
+
+export interface AdminUser {
+  id: string
+  email: string
+  name: string
+  email_verified: boolean
+  roles: string[]
+  workspace_count: number
+  created_at: string
+}
+
+export interface AdminUserListResponse {
+  users: AdminUser[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface AdminWorkspace {
+  id: string
+  name: string
+  slug: string
+  plan: string
+  owner_email: string
+  owner_name: string
+  member_count: number
+  stripe_account_count: number
+  created_at: string
+}
+
+export interface AdminWorkspaceListResponse {
+  workspaces: AdminWorkspace[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface RoleChangeResponse {
+  success: boolean
+  message: string
+  roles: string[]
+}
+
+// Admin API
+export const adminApi = {
+  getStats: () =>
+    fetchApi<PlatformStats>('/api/admin/stats'),
+
+  listUsers: (params?: { page?: number; page_size?: number; search?: string }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.page) searchParams.set('page', params.page.toString())
+    if (params?.page_size) searchParams.set('page_size', params.page_size.toString())
+    if (params?.search) searchParams.set('search', params.search)
+    const query = searchParams.toString()
+    return fetchApi<AdminUserListResponse>(`/api/admin/users${query ? `?${query}` : ''}`)
+  },
+
+  listWorkspaces: (params?: { page?: number; page_size?: number; search?: string }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.page) searchParams.set('page', params.page.toString())
+    if (params?.page_size) searchParams.set('page_size', params.page_size.toString())
+    if (params?.search) searchParams.set('search', params.search)
+    const query = searchParams.toString()
+    return fetchApi<AdminWorkspaceListResponse>(`/api/admin/workspaces${query ? `?${query}` : ''}`)
+  },
+
+  getUserDetails: (userId: string) =>
+    fetchApi<AdminUser & { workspaces: Array<{ id: string; name: string; slug: string; plan: string }> }>(
+      `/api/admin/users/${userId}`
+    ),
+
+  addRole: (userId: string, role: string) =>
+    fetchApi<RoleChangeResponse>(`/api/admin/users/${userId}/roles`, {
+      method: 'POST',
+      body: JSON.stringify({ role }),
+    }),
+
+  removeRole: (userId: string, role: string) =>
+    fetchApi<RoleChangeResponse>(`/api/admin/users/${userId}/roles/${role}`, {
+      method: 'DELETE',
+    }),
 }
 
 export { ApiError }

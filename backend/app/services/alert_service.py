@@ -2,14 +2,20 @@
 Alert Service - Creates and manages alerts for payment events.
 """
 import uuid
+import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
 
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import StripeAccount
-from app.models.alert import Alert, AlertType, AlertSeverity, AlertStatus
+from app.models.alert import Alert, AlertType, AlertSeverity, AlertStatus, AlertDelivery, DeliveryStatus
+from app.models.notification import NotificationChannel, ChannelType
+
+logger = logging.getLogger(__name__)
 
 
 def format_amount(amount: int, currency: str = "usd") -> str:
@@ -29,7 +35,7 @@ async def create_alert(
     body: str,
     metadata: Optional[dict] = None,
 ) -> Alert:
-    """Create a new alert."""
+    """Create a new alert and trigger notifications."""
     alert = Alert(
         workspace_id=workspace_id,
         stripe_account_id=stripe_account_id,
@@ -43,7 +49,190 @@ async def create_alert(
     db.add(alert)
     await db.flush()
     await db.refresh(alert)
+
+    # Trigger notifications for this alert
+    await deliver_alert_notifications(db, alert)
+
     return alert
+
+
+async def deliver_alert_notifications(db: AsyncSession, alert: Alert) -> None:
+    """Deliver alert to all configured notification channels."""
+    from app.services.notification_service import send_email_notification
+
+    # Get enabled notification channels for this workspace
+    result = await db.execute(
+        select(NotificationChannel)
+        .where(NotificationChannel.workspace_id == alert.workspace_id)
+        .where(NotificationChannel.enabled == True)
+    )
+    channels = result.scalars().all()
+
+    if not channels:
+        logger.info(f"No enabled notification channels for alert {alert.id}")
+        alert.status = AlertStatus.SENT  # Mark as sent even if no channels
+        await db.flush()
+        return
+
+    # Send to each channel
+    for channel in channels:
+        # Check if this alert type should be sent to this channel (based on routing config)
+        routing_config = channel.routing_config_json or {}
+        alert_type_config = routing_config.get(alert.alert_type.value)
+
+        # If routing config exists and this alert type is explicitly disabled, skip
+        if alert_type_config is not None and not alert_type_config:
+            logger.info(
+                f"Skipping channel {channel.id} for alert type {alert.alert_type.value} "
+                f"(disabled in routing config)"
+            )
+            continue
+
+        # Create delivery record
+        delivery = AlertDelivery(
+            alert_id=alert.id,
+            channel_id=channel.id,
+            status=DeliveryStatus.PENDING,
+        )
+        db.add(delivery)
+        await db.flush()
+        await db.refresh(delivery)
+
+        # Send notification based on channel type
+        success = False
+        error_message = None
+
+        try:
+            if channel.channel_type == ChannelType.EMAIL:
+                success, error_message = await send_email_notification(alert, channel, delivery)
+            # TODO: Add support for other channel types (SMS, Slack, Discord)
+            else:
+                error_message = f"Channel type {channel.channel_type.value} not yet supported"
+                logger.warning(error_message)
+
+            # Update delivery status
+            if success:
+                delivery.status = DeliveryStatus.SENT
+                delivery.delivered_at = datetime.utcnow()
+                logger.info(
+                    f"Alert {alert.id} delivered via {channel.channel_type.value} "
+                    f"(channel {channel.id})"
+                )
+            else:
+                delivery.status = DeliveryStatus.FAILED
+                delivery.error_message = error_message
+                logger.error(
+                    f"Failed to deliver alert {alert.id} via {channel.channel_type.value}: "
+                    f"{error_message}"
+                )
+
+        except Exception as e:
+            delivery.status = DeliveryStatus.FAILED
+            delivery.error_message = str(e)
+            logger.exception(f"Error delivering alert {alert.id} via {channel.channel_type.value}")
+
+        await db.flush()
+
+    # Update alert status based on delivery results
+    result = await db.execute(
+        select(AlertDelivery)
+        .where(AlertDelivery.alert_id == alert.id)
+    )
+    deliveries = result.scalars().all()
+
+    if all(d.status == DeliveryStatus.SENT for d in deliveries):
+        alert.status = AlertStatus.SENT
+    elif any(d.status == DeliveryStatus.SENT for d in deliveries):
+        alert.status = AlertStatus.SENT  # At least one succeeded
+    else:
+        alert.status = AlertStatus.FAILED
+
+    await db.flush()
+
+
+async def resolve_alert(
+    db: AsyncSession,
+    alert: Alert,
+    reason: str,
+) -> Alert:
+    """Resolve an alert with the given reason."""
+    alert.status = AlertStatus.RESOLVED
+    alert.resolved_at = datetime.utcnow()
+    alert.resolution_reason = reason
+    await db.flush()
+    await db.refresh(alert)
+    return alert
+
+
+async def auto_resolve_payment_alerts_for_customer(
+    db: AsyncSession,
+    stripe_account: StripeAccount,
+    customer_id: str,
+    invoice_id: Optional[str] = None,
+    payment_intent_id: Optional[str] = None,
+) -> List[Alert]:
+    """
+    Auto-resolve open payment failure alerts when a payment succeeds.
+
+    Matches alerts by customer_id and optionally by invoice_id or payment_intent_id
+    stored in metadata.
+    """
+    if not customer_id:
+        return []
+
+    # Find open payment failure alerts for this customer
+    query = (
+        select(Alert)
+        .where(Alert.stripe_account_id == stripe_account.id)
+        .where(Alert.alert_type == AlertType.PAYMENT_FAILED)
+        .where(Alert.status.in_([AlertStatus.PENDING, AlertStatus.SENT]))
+    )
+
+    result = await db.execute(query)
+    alerts = result.scalars().all()
+
+    resolved_alerts = []
+    for alert in alerts:
+        metadata = alert.metadata_json or {}
+
+        # Check if this alert matches the successful payment
+        alert_customer = metadata.get("customer")
+        if alert_customer != customer_id:
+            continue
+
+        # If we have an invoice_id, prefer matching by it
+        if invoice_id:
+            alert_invoice = metadata.get("invoice_id")
+            if alert_invoice and alert_invoice == invoice_id:
+                await resolve_alert(
+                    db, alert,
+                    "Auto-closed: Payment successfully completed by customer"
+                )
+                resolved_alerts.append(alert)
+                continue
+
+        # If we have a payment_intent_id, match by it
+        if payment_intent_id:
+            alert_pi = metadata.get("payment_intent_id")
+            if alert_pi and alert_pi == payment_intent_id:
+                await resolve_alert(
+                    db, alert,
+                    "Auto-closed: Payment successfully completed by customer"
+                )
+                resolved_alerts.append(alert)
+                continue
+
+        # For general customer match without specific IDs, still resolve
+        # This handles cases where a different payment was made but still counts
+        # as the customer having paid
+        if not invoice_id and not payment_intent_id:
+            await resolve_alert(
+                db, alert,
+                "Auto-closed: Payment received from customer"
+            )
+            resolved_alerts.append(alert)
+
+    return resolved_alerts
 
 
 async def create_payment_failed_alert(

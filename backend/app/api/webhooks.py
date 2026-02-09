@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -13,6 +14,8 @@ from app.database import get_db
 from app.models import StripeAccount, StripeEvent
 from app.models.stripe_account import StripeEventStatus
 from app.services import alert_service, risk_service, metrics_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -184,14 +187,27 @@ async def handle_payment_failed(db: AsyncSession, account: StripeAccount, data: 
 
 
 async def handle_charge_succeeded(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle successful charge - updates risk metrics and revenue."""
+    """Handle successful charge - updates risk metrics, revenue, and auto-resolves payment alerts."""
     amount = data.get("amount", 0)
     timestamp = datetime.fromtimestamp(data.get("created", datetime.utcnow().timestamp()))
+    customer_id = data.get("customer")
+    payment_intent_id = data.get("payment_intent")
+    invoice_id = data.get("invoice")
 
     await asyncio.gather(
         risk_service.update_risk_for_charge_succeeded(db, account, data),
         metrics_service.record_successful_charge(db, account.id, amount, timestamp),
     )
+
+    # Auto-resolve payment failure alerts for this customer
+    if customer_id:
+        resolved = await alert_service.auto_resolve_payment_alerts_for_customer(
+            db, account, customer_id,
+            invoice_id=invoice_id,
+            payment_intent_id=payment_intent_id,
+        )
+        if resolved:
+            logger.info(f"Auto-resolved {len(resolved)} payment alerts for customer {customer_id}")
 
 
 async def handle_charge_failed(db: AsyncSession, account: StripeAccount, data: dict):
@@ -268,15 +284,23 @@ async def handle_subscription_deleted(db: AsyncSession, account: StripeAccount, 
 
 
 async def handle_invoice_paid(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle paid invoice - updates revenue."""
+    """Handle paid invoice - updates revenue and auto-resolves payment alerts."""
     # Invoice payments are already tracked via charges, but we can track them separately too
     amount = data.get("amount_paid", 0)
+    customer_id = data.get("customer")
+    invoice_id = data.get("id")
+
     if amount > 0:
-        timestamp = datetime.fromtimestamp(data.get("status_transitions", {}).get("paid_at") or data.get("created", datetime.utcnow().timestamp()))
-        # Note: This is already tracked in charge.succeeded, so we skip to avoid double-counting
-        # await metrics_service.record_successful_charge(db, account.id, amount, timestamp)
         logger.info(f"Invoice paid: ${amount / 100} (already tracked in charge.succeeded)")
-    pass
+
+    # Auto-resolve payment failure alerts for this customer/invoice
+    if customer_id:
+        resolved = await alert_service.auto_resolve_payment_alerts_for_customer(
+            db, account, customer_id,
+            invoice_id=invoice_id,
+        )
+        if resolved:
+            logger.info(f"Auto-resolved {len(resolved)} payment alerts for invoice {invoice_id}")
 
 
 async def handle_invoice_payment_failed(db: AsyncSession, account: StripeAccount, data: dict):

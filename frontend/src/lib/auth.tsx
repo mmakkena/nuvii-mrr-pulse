@@ -9,6 +9,7 @@ interface User {
   email: string
   name: string
   avatar_url: string | null
+  roles: string[]
 }
 
 interface Workspace {
@@ -24,12 +25,13 @@ interface AuthContextType {
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => void
-  signup: (email: string, password: string, name: string) => Promise<void>
+  signup: (email: string, password: string, name: string, workspaceName?: string) => Promise<string>
+  hasRole: (role: string) => boolean
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
-const PUBLIC_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password', '/onboarding']
+const PUBLIC_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password', '/onboarding', '/verify-email', '/terms', '/privacy']
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
@@ -111,10 +113,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const signup = async (email: string, password: string, name: string) => {
-    await authApi.signup({ email, password, name })
-    // After signup, log them in
-    await login(email, password)
+  const signup = async (email: string, password: string, name: string, workspaceName?: string): Promise<string> => {
+    const payload: any = { email, password, name }
+    if (workspaceName) {
+      payload.workspace_name = workspaceName
+    }
+    const response = await authApi.signup(payload)
+    // Return email for OTP verification
+    return response.email
   }
 
   const logout = () => {
@@ -127,8 +133,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/login')
   }
 
+  const hasRole = (role: string): boolean => {
+    return user?.roles?.includes(role) ?? false
+  }
+
   return (
-    <AuthContext.Provider value={{ user, token, workspace, isLoading, login, logout, signup }}>
+    <AuthContext.Provider value={{ user, token, workspace, isLoading, login, logout, signup, hasRole }}>
       {children}
     </AuthContext.Provider>
   )

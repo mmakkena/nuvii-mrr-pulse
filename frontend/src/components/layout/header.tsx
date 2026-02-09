@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Bell, Search, User, Settings, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,25 +12,48 @@ import Badge from '@mui/material/Badge'
 import Divider from '@mui/material/Divider'
 import { useAuth } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
+import { alertsApi, Alert } from '@/lib/api'
+import { formatRelativeTime } from '@/lib/utils'
 
 interface HeaderProps {
   title: string
   description?: string
 }
 
+interface Notification {
+  id: string
+  title: string
+  time: string
+}
+
 export function Header({ title, description }: HeaderProps) {
-  const { user, logout } = useAuth()
+  const { user, logout, token } = useAuth()
   const router = useRouter()
 
   const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null)
   const [userAnchor, setUserAnchor] = useState<null | HTMLElement>(null)
+  const [notifications, setNotifications] = useState<Notification[]>([])
 
-  // Mock notifications data
-  const notifications = [
-    { id: '1', title: 'Payment failed for customer John Doe', time: '5 min ago' },
-    { id: '2', title: 'New chargeback alert', time: '1 hour ago' },
-    { id: '3', title: 'Refund rate threshold exceeded', time: '2 hours ago' },
-  ]
+  // Fetch recent alerts for notifications
+  useEffect(() => {
+    if (!token) return
+
+    async function fetchNotifications() {
+      try {
+        const response = await alertsApi.list({ page_size: 5, status: 'active' })
+        const notifs = response.alerts.map((alert: Alert) => ({
+          id: alert.id,
+          title: alert.title,
+          time: formatRelativeTime(alert.created_at),
+        }))
+        setNotifications(notifs)
+      } catch {
+        // Silently fail - notifications are not critical
+        setNotifications([])
+      }
+    }
+    fetchNotifications()
+  }, [token])
 
   const handleNotifClick = (event: React.MouseEvent<HTMLElement>) => {
     setNotifAnchor(event.currentTarget)

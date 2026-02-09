@@ -108,13 +108,16 @@ async def start_stripe_connect(
 
     # Build OAuth authorization URL
     if settings.stripe_client_id:
-        # Full OAuth flow with client_id
+        # OAuth flow with read_write access
+        # Note: read_only scope requires special Stripe approval and is not available by default
+        # We use read_write but only exercise read operations in our application
         params = {
             "response_type": "code",
             "client_id": settings.stripe_client_id,
-            "scope": "read_write",
+            "scope": "read_write",  # Standard scope for monitoring platforms
             "redirect_uri": f"{settings.api_url}/api/stripe/connect/callback",
             "state": state,
+            "stripe_landing": "register",  # Or "login" - determines Stripe UI flow
         }
         authorization_url = f"https://connect.stripe.com/oauth/authorize?{urlencode(params)}"
     else:
@@ -226,7 +229,7 @@ async def stripe_connect_callback(
         await db.flush()
         await db.refresh(stripe_acc)
 
-        # Redirect to frontend success page
+        # Return success response (frontend will handle redirect)
         return {"message": "Stripe account connected successfully", "account": stripe_account_to_response(stripe_acc)}
 
     except stripe.oauth_error.OAuthError as e:

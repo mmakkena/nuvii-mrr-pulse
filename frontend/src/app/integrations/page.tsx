@@ -17,6 +17,8 @@ import {
 } from 'lucide-react'
 import { integrationsApi, Integration } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { EmailConfigModal } from '@/components/integrations/email-config-modal'
+import { StripeConnectCard } from '@/components/integrations/stripe-connect-card'
 
 const integrationIcons: Record<string, React.ReactNode> = {
   stripe: (
@@ -45,6 +47,8 @@ export default function IntegrationsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [testingIntegration, setTestingIntegration] = useState<string | null>(null)
+  const [emailModalOpen, setEmailModalOpen] = useState(false)
+  const [configuringIntegration, setConfiguringIntegration] = useState(false)
 
   useEffect(() => {
     if (authLoading || !token) return
@@ -83,6 +87,23 @@ export default function IntegrationsPage() {
       setIntegrations((prev) => prev.filter((i) => i.id !== id))
     } catch (err) {
       alert('Failed to disconnect integration')
+    }
+  }
+
+  const handleConnectEmail = async (emails: string[], provider: 'simple' | 'sendgrid' | 'ses') => {
+    setConfiguringIntegration(true)
+    try {
+      // Configure email integration
+      await integrationsApi.configureEmail(emails)
+
+      // Refresh integrations list
+      const updatedIntegrations = await integrationsApi.list()
+      setIntegrations(updatedIntegrations)
+      setEmailModalOpen(false)
+    } catch (err) {
+      throw err // Re-throw to let modal handle the error
+    } finally {
+      setConfiguringIntegration(false)
     }
   }
 
@@ -133,6 +154,9 @@ export default function IntegrationsPage() {
       />
 
       <div className="p-6 space-y-6">
+        {/* Stripe Connect */}
+        <StripeConnectCard workspaceId={localStorage.getItem('workspace_id') || ''} />
+
         {/* Connected Integrations */}
         <div>
           <h2 className="text-lg font-semibold text-slate-900 mb-4">
@@ -268,7 +292,16 @@ export default function IntegrationsPage() {
                           </p>
                         </div>
                       </div>
-                      <Button size="sm" onClick={() => alert(`Connect ${integration.name} coming soon`)}>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (integration.type === 'email') {
+                            setEmailModalOpen(true)
+                          } else {
+                            alert(`Connect ${integration.name} coming soon`)
+                          }
+                        }}
+                      >
                         <Plus className="w-4 h-4 mr-1" />
                         Connect
                       </Button>
@@ -338,6 +371,13 @@ export default function IntegrationsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Email Configuration Modal */}
+        <EmailConfigModal
+          open={emailModalOpen}
+          onClose={() => setEmailModalOpen(false)}
+          onSave={handleConnectEmail}
+        />
       </div>
     </DashboardLayout>
   )

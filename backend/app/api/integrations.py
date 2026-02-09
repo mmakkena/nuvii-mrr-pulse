@@ -524,6 +524,8 @@ async def test_integration(
     current_user: User = Depends(get_current_user),
 ):
     """Send a test notification to this channel."""
+    from app.services.notification_service import send_test_notification
+
     workspace = await get_user_workspace(db, current_user, workspace_id)
 
     # Handle placeholder IDs
@@ -545,11 +547,15 @@ async def test_integration(
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    # TODO: Actually send test notification via delivery service
-    # For now, just return success
+    # Send test notification
+    success, message = await send_test_notification(channel)
+
+    if not success:
+        raise HTTPException(status_code=500, detail=message)
+
     return {
         "success": True,
-        "message": f"Test notification sent to {channel.name}",
+        "message": message,
         "channel_type": channel.channel_type.value,
     }
 

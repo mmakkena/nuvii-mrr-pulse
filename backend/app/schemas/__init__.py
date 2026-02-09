@@ -11,6 +11,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     name: str
+    workspace_name: Optional[str] = Field(None, min_length=1, max_length=100)
 
 
 class UserLogin(BaseModel):
@@ -24,6 +25,7 @@ class UserResponse(BaseModel):
     name: str
     avatar_url: Optional[str] = None
     email_verified: bool
+    roles: List[str] = ["user"]
     created_at: datetime
 
     class Config:

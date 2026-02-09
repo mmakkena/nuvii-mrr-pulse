@@ -15,7 +15,7 @@ import {
   ArrowLeft,
   Loader2,
 } from 'lucide-react'
-import { workspacesApi, rulesApi } from '@/lib/api'
+import { workspacesApi, rulesApi, stripeConnectApi } from '@/lib/api'
 
 const steps = [
   { id: 'workspace', title: 'Create Workspace', icon: Building2 },
@@ -97,13 +97,25 @@ export default function OnboardingPage() {
     }
   }
 
-  const handleConnectStripe = () => {
+  const handleConnectStripe = async () => {
     setIsConnectingStripe(true)
-    // TODO: Implement Stripe Connect OAuth
-    setTimeout(() => {
+    setError(null)
+
+    try {
+      const workspaceId = localStorage.getItem('workspace_id')
+      if (!workspaceId) {
+        throw new Error('No workspace found')
+      }
+
+      // Get OAuth URL from backend
+      const { authorization_url } = await stripeConnectApi.startConnect(workspaceId)
+
+      // Redirect to Stripe OAuth page
+      window.location.href = authorization_url
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start Stripe Connect')
       setIsConnectingStripe(false)
-      setStripeConnected(true)
-    }, 2000)
+    }
   }
 
   const togglePack = (packId: string) => {

@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { PasswordInput } from '@/components/ui/password-input'
 import { useAuth } from '@/lib/auth'
 
 export default function LoginPage() {
@@ -26,11 +27,6 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  const handleGoogleLogin = () => {
-    // TODO: Implement Google OAuth
-    console.log('Google login')
   }
 
   if (authLoading) {
@@ -70,6 +66,7 @@ export default function LoginPage() {
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
                 required
               />
             </div>
@@ -77,12 +74,12 @@ export default function LoginPage() {
               <label htmlFor="password" className="text-sm font-medium">
                 Password
               </label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
                 required
               />
             </div>
@@ -109,11 +106,12 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Google Sign In - Disabled with Coming Soon */}
           <Button
             type="button"
             variant="outline"
-            className="w-full"
-            onClick={handleGoogleLogin}
+            className="w-full opacity-60 cursor-not-allowed"
+            disabled
           >
             <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
               <path
@@ -134,13 +132,24 @@ export default function LoginPage() {
               />
             </svg>
             Continue with Google
+            <span className="ml-2 text-xs bg-slate-100 px-2 py-0.5 rounded">Coming Soon</span>
           </Button>
         </CardContent>
-        <CardFooter className="justify-center">
+        <CardFooter className="flex flex-col items-center gap-4">
           <p className="text-sm text-slate-500">
             Don't have an account?{' '}
             <Link href="/signup" className="text-blue-600 hover:underline font-medium">
               Sign up
+            </Link>
+          </p>
+          <p className="text-xs text-slate-400">
+            By signing in, you agree to our{' '}
+            <Link href="/terms" className="text-blue-600 hover:underline">
+              Terms of Service
+            </Link>{' '}
+            and{' '}
+            <Link href="/privacy" className="text-blue-600 hover:underline">
+              Privacy Policy
             </Link>
           </p>
         </CardFooter>
