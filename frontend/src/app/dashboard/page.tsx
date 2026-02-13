@@ -18,6 +18,7 @@ import {
 import { formatCurrency, formatRelativeTime } from '@/lib/utils'
 import { alertsApi, riskApi, dashboardApi, Alert, RiskStatus, DashboardStats } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { useAlertSnackbar } from '@/components/ui/alert-snackbar'
 import Link from 'next/link'
 
 function getSeverityColor(severity: string) {
@@ -57,6 +58,7 @@ function getRiskBorderColor(status: string) {
 
 export default function DashboardPage() {
   const { isLoading: authLoading, token } = useAuth()
+  const { showError, showSuccess, AlertSnackbar } = useAlertSnackbar()
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [riskStatus, setRiskStatus] = useState<RiskStatus | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -99,9 +101,9 @@ export default function DashboardPage() {
   const handleSendTestAlert = async () => {
     try {
       const result = await alertsApi.sendTest()
-      alert(result.message)
+      showSuccess(result.message)
     } catch (err) {
-      alert('Failed to send test alert')
+      showError('Failed to send test alert')
     }
   }
 
@@ -382,6 +384,7 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+      <AlertSnackbar />
     </DashboardLayout>
   )
 }

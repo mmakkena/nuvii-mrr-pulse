@@ -7,6 +7,7 @@ from app.models.notification import NotificationChannel, EscalationRoster
 from app.models.risk import RiskState
 from app.models.billing import Subscription, Invoice
 from app.models.audit import AuditLog
+from app.models.email_template import EmailTemplate, EmailTemplateType
 
 __all__ = [
     "User",
@@ -25,4 +26,6 @@ __all__ = [
     "Subscription",
     "Invoice",
     "AuditLog",
+    "EmailTemplate",
+    "EmailTemplateType",
 ]

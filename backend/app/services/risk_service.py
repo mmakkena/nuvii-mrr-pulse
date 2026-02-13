@@ -279,9 +279,10 @@ async def _check_and_create_alerts(
             )
         )
 
-    # Execute all alert creations in parallel
+    # Execute all alert creations sequentially to avoid concurrent DB operations on same session
     if alert_tasks:
-        await asyncio.gather(*alert_tasks)
+        for alert_task in alert_tasks:
+            await alert_task
 
 
 def _capture_previous_state(risk_state: RiskState) -> dict:

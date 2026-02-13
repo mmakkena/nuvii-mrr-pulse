@@ -50,6 +50,14 @@ class StripeAccount(Base):
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
+    # Soft delete fields
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+
     # Relationships
     workspace = relationship("Workspace", back_populates="stripe_accounts")
     events = relationship("StripeEvent", back_populates="stripe_account")
@@ -80,6 +88,29 @@ class StripeEvent(Base):
         DateTime(timezone=True), default=datetime.utcnow
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Relationship tracking fields for linking related events
+    payment_intent_id: Mapped[str | None] = mapped_column(
+        String(255), index=True, nullable=True
+    )
+    charge_id: Mapped[str | None] = mapped_column(
+        String(255), index=True, nullable=True
+    )
+    customer_id: Mapped[str | None] = mapped_column(
+        String(255), index=True, nullable=True
+    )
+    invoice_id: Mapped[str | None] = mapped_column(
+        String(255), index=True, nullable=True
+    )
+    subscription_id: Mapped[str | None] = mapped_column(
+        String(255), index=True, nullable=True
+    )
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(255), index=True, nullable=True
+    )
+    stripe_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     stripe_account = relationship("StripeAccount", back_populates="events")

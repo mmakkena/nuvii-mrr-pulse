@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { DashboardLayout, Header } from '@/components/layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { useAlertSnackbar } from '@/components/ui/alert-snackbar'
 import {
   Users,
   Building2,
@@ -59,6 +60,7 @@ function RoleChip({ role, onRemove }: { role: string; onRemove?: () => void }) {
 export default function AdminPage() {
   const { isLoading: authLoading, token, hasRole } = useAuth()
   const router = useRouter()
+  const { showError, AlertSnackbar } = useAlertSnackbar()
 
   const [stats, setStats] = useState<PlatformStats | null>(null)
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -118,7 +120,7 @@ export default function AdminPage() {
         )
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to add role')
+      showError(err instanceof Error ? err.message : 'Failed to add role')
     } finally {
       setRoleLoading(null)
     }
@@ -134,7 +136,7 @@ export default function AdminPage() {
         )
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to remove role')
+      showError(err instanceof Error ? err.message : 'Failed to remove role')
     } finally {
       setRoleLoading(null)
     }
@@ -500,6 +502,7 @@ export default function AdminPage() {
           </Card>
         )}
       </div>
+      <AlertSnackbar />
     </DashboardLayout>
   )
 }

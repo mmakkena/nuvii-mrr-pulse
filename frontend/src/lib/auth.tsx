@@ -31,7 +31,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
-const PUBLIC_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password', '/onboarding', '/verify-email', '/terms', '/privacy']
+const PUBLIC_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password', '/onboarding', '/verify-email', '/accept-invitation', '/terms', '/privacy']
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)

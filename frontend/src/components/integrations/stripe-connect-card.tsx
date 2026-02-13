@@ -3,8 +3,18 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { CreditCard, Plus, Trash2, RefreshCw, Check, Loader2 } from 'lucide-react'
+import { CreditCard, Plus, Trash2, RefreshCw, Check, Loader2, AlertTriangle } from 'lucide-react'
 import { stripeConnectApi, StripeAccountResponse } from '@/lib/api'
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  Snackbar,
+  Alert,
+  Box,
+} from '@mui/material'
 
 interface StripeConnectCardProps {
   workspaceId: string
@@ -15,6 +25,28 @@ export function StripeConnectCard({ workspaceId }: StripeConnectCardProps) {
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean
+    accountId: string | null
+    accountName: string
+  }>({
+    open: false,
+    accountId: null,
+    accountName: '',
+  })
+
+  // Error notification state
+  const [notification, setNotification] = useState<{
+    open: boolean
+    message: string
+    severity: 'error' | 'success' | 'info'
+  }>({
+    open: false,
+    message: '',
+    severity: 'info',
+  })
 
   const fetchAccounts = async () => {
     try {
@@ -40,25 +72,54 @@ export function StripeConnectCard({ workspaceId }: StripeConnectCardProps) {
       const { authorization_url } = await stripeConnectApi.startConnect(workspaceId)
       window.location.href = authorization_url
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to start Stripe Connect')
+      setNotification({
+        open: true,
+        message: err instanceof Error ? err.message : 'Failed to start Stripe Connect',
+        severity: 'error',
+      })
       setConnecting(false)
     }
   }
 
-  const handleDisconnect = async (accountId: string) => {
-    if (!confirm('Are you sure you want to disconnect this Stripe account? This will stop all monitoring and alerts for this account.')) {
-      return
-    }
+  const handleDisconnect = async (accountId: string, accountName: string) => {
+    // Show confirmation dialog
+    setConfirmDialog({
+      open: true,
+      accountId,
+      accountName,
+    })
+  }
+
+  const confirmDisconnect = async () => {
+    const { accountId } = confirmDialog
+
+    if (!accountId) return
+
+    // Close dialog
+    setConfirmDialog({ open: false, accountId: null, accountName: '' })
 
     setActionLoading(accountId)
     try {
       await stripeConnectApi.disconnectAccount(accountId)
       await fetchAccounts()
+      setNotification({
+        open: true,
+        message: 'Stripe account disconnected successfully',
+        severity: 'success',
+      })
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to disconnect account')
+      setNotification({
+        open: true,
+        message: err instanceof Error ? err.message : 'Failed to disconnect account',
+        severity: 'error',
+      })
     } finally {
       setActionLoading(null)
     }
+  }
+
+  const cancelDisconnect = () => {
+    setConfirmDialog({ open: false, accountId: null, accountName: '' })
   }
 
   const handleSync = async (accountId: string) => {
@@ -66,11 +127,24 @@ export function StripeConnectCard({ workspaceId }: StripeConnectCardProps) {
     try {
       await stripeConnectApi.syncAccount(accountId)
       await fetchAccounts()
+      setNotification({
+        open: true,
+        message: 'Account synced successfully',
+        severity: 'success',
+      })
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to sync account')
+      setNotification({
+        open: true,
+        message: err instanceof Error ? err.message : 'Failed to sync account',
+        severity: 'error',
+      })
     } finally {
       setActionLoading(null)
     }
+  }
+
+  const handleCloseNotification = () => {
+    setNotification({ ...notification, open: false })
   }
 
   if (loading) {
@@ -171,7 +245,7 @@ export function StripeConnectCard({ workspaceId }: StripeConnectCardProps) {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => handleDisconnect(account.id)}
+                    onClick={() => handleDisconnect(account.id, account.business_name || 'Stripe Account')}
                     disabled={actionLoading === account.id}
                     className="text-red-600 hover:text-red-700"
                   >
@@ -190,6 +264,91 @@ export function StripeConnectCard({ workspaceId }: StripeConnectCardProps) {
           </p>
         </div>
       </CardContent>
+
+      {/* Confirmation Dialog */}
+      <Dialog
+        open={confirmDialog.open}
+        onClose={cancelDisconnect}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+          },
+        }}
+      >
+        <DialogTitle sx={{ pb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 40,
+              height: 40,
+              borderRadius: 1,
+              bgcolor: 'error.light',
+              color: 'error.main',
+            }}
+          >
+            <AlertTriangle className="w-5 h-5" />
+          </Box>
+          <span>Disconnect Stripe Account</span>
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
+            Are you sure you want to disconnect{' '}
+            <strong>{confirmDialog.accountName}</strong>?
+          </DialogContentText>
+          <Box
+            sx={{
+              p: 2,
+              bgcolor: 'warning.light',
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: 'warning.main',
+            }}
+          >
+            <DialogContentText sx={{ fontSize: '0.875rem', color: 'warning.dark' }}>
+              This will stop all monitoring and alerts for this account. You can reconnect it later if needed.
+            </DialogContentText>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button
+            onClick={cancelDisconnect}
+            variant="outline"
+            size="sm"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmDisconnect}
+            variant="destructive"
+            size="sm"
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            Disconnect
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Notification Snackbar */}
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={6000}
+        onClose={handleCloseNotification}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={handleCloseNotification}
+          severity={notification.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {notification.message}
+        </Alert>
+      </Snackbar>
     </Card>
   )
 }

@@ -18,6 +18,7 @@ import {
 import { formatRelativeTime, formatCurrency } from '@/lib/utils'
 import { alertsApi, Alert } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { useAlertSnackbar } from '@/components/ui/alert-snackbar'
 
 const severityConfig = {
   critical: {
@@ -62,6 +63,7 @@ const statusConfig = {
 
 export default function AlertsPage() {
   const { isLoading: authLoading, token } = useAuth()
+  const { showError, AlertSnackbar } = useAlertSnackbar()
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -98,7 +100,7 @@ export default function AlertsPage() {
         )
       )
     } catch (err) {
-      alert('Failed to acknowledge alert')
+      showError('Failed to acknowledge alert')
     }
   }
 
@@ -309,6 +311,7 @@ export default function AlertsPage() {
           </div>
         )}
       </div>
+      <AlertSnackbar />
     </DashboardLayout>
   )
 }

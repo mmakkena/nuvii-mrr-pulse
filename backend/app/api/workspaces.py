@@ -1,6 +1,7 @@
 import re
+import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -22,6 +23,7 @@ from app.schemas import (
     WorkspaceRole,
 )
 from app.utils.auth import get_current_user
+from app.services.email_service import send_invitation_email
 
 router = APIRouter()
 
@@ -259,16 +261,34 @@ async def invite_member(
     # Map schema role to DB role
     db_role = DBWorkspaceRole(data.role.value)
 
-    # Create membership
+    # Generate secure invitation token (32 bytes = 64 hex characters)
+    invitation_token = secrets.token_urlsafe(32)
+    token_expires_at = datetime.utcnow() + timedelta(days=7)
+
+    # Create membership with invitation token
     member = WorkspaceMember(
         workspace_id=workspace.id,
         user_id=invite_user.id,
         role=db_role,
         invited_at=datetime.utcnow(),
+        invitation_token=invitation_token,
+        token_expires_at=token_expires_at,
+        # joined_at stays NULL until invitation is accepted
     )
     db.add(member)
     await db.flush()
     await db.refresh(member)
+
+    # Send invitation email
+    await send_invitation_email(
+        db=db,
+        to_email=invite_user.email,
+        inviter_name=current_user.name,
+        workspace_name=workspace.name,
+        invitation_token=invitation_token,
+        workspace_id=workspace.id,
+        user_name=invite_user.name
+    )
 
     return member_to_response(member, invite_user)
 

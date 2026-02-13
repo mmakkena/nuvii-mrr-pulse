@@ -22,6 +22,9 @@ import {
 } from 'lucide-react'
 import { rulesApi, Rule } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { ConditionBuilder } from '@/components/rules/condition-builder'
+import { useConfirmationDialog } from '@/components/ui/confirmation-dialog'
+import { useAlertSnackbar } from '@/components/ui/alert-snackbar'
 
 const ruleTypeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   payment_failed: CreditCard,
@@ -68,6 +71,10 @@ export default function RulesPage() {
   const [error, setError] = useState<string | null>(null)
   const [applyingPreset, setApplyingPreset] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+  // Alert and confirmation dialogs
+  const { confirm, ConfirmationDialog } = useConfirmationDialog()
+  const { showError, showSuccess, AlertSnackbar } = useAlertSnackbar()
 
   // Create/Edit modal state
   const [showModal, setShowModal] = useState(false)
@@ -174,21 +181,25 @@ export default function RulesPage() {
         prev.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r))
       )
     } catch (err) {
-      alert('Failed to toggle rule')
+      showError('Failed to toggle rule')
     }
   }
 
-  const handleDeleteRule = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this rule?')) return
-
-    try {
-      await rulesApi.delete(id)
-      setRules((prev) => prev.filter((r) => r.id !== id))
-      setSuccessMessage('Rule deleted successfully')
-      setTimeout(() => setSuccessMessage(null), 3000)
-    } catch (err) {
-      alert('Failed to delete rule')
-    }
+  const handleDeleteRule = (id: string) => {
+    confirm(
+      'Delete Rule',
+      'Are you sure you want to delete this rule? This action cannot be undone.',
+      async () => {
+        try {
+          await rulesApi.delete(id)
+          setRules((prev) => prev.filter((r) => r.id !== id))
+          showSuccess('Rule deleted successfully')
+        } catch (err) {
+          showError('Failed to delete rule')
+        }
+      },
+      { severity: 'error', confirmText: 'Delete' }
+    )
   }
 
   const handleApplyPreset = async (presetName: string) => {
@@ -199,11 +210,10 @@ export default function RulesPage() {
         // Refresh rules list
         const response = await rulesApi.list()
         setRules(response)
-        setSuccessMessage(`${presetName.charAt(0).toUpperCase() + presetName.slice(1)} Pack applied successfully!`)
-        setTimeout(() => setSuccessMessage(null), 3000)
+        showSuccess(`${presetName.charAt(0).toUpperCase() + presetName.slice(1)} Pack applied successfully!`)
       }
     } catch (err) {
-      alert('Failed to apply preset')
+      showError('Failed to apply preset')
     } finally {
       setApplyingPreset(null)
     }
@@ -492,6 +502,14 @@ export default function RulesPage() {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <ConditionBuilder
+                  value={formData.conditions}
+                  onChange={(conds) => setFormData(prev => ({ ...prev, conditions: conds }))}
+                  alertType={formData.type}
+                />
+              </div>
+
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -524,6 +542,12 @@ export default function RulesPage() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Dialog */}
+      <ConfirmationDialog />
+
+      {/* Alert Snackbar */}
+      <AlertSnackbar />
     </DashboardLayout>
   )
 }

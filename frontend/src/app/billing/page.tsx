@@ -15,6 +15,7 @@ import {
 import { formatCurrency } from '@/lib/utils'
 import { billingApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { useAlertSnackbar } from '@/components/ui/alert-snackbar'
 
 const plans = [
   {
@@ -76,6 +77,7 @@ interface Subscription {
 
 export default function BillingPage() {
   const { token, isLoading: authLoading } = useAuth()
+  const { showError, AlertSnackbar } = useAlertSnackbar()
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -105,7 +107,7 @@ export default function BillingPage() {
       const { portal_url } = await billingApi.getPortalUrl(token)
       window.open(portal_url, '_blank')
     } catch (err) {
-      alert('Unable to open billing portal. Please try again.')
+      showError('Unable to open billing portal. Please try again.')
     }
   }
 
@@ -116,7 +118,7 @@ export default function BillingPage() {
       const { checkout_url } = await billingApi.createCheckout(token, priceId)
       window.location.href = checkout_url
     } catch (err) {
-      alert('Unable to start checkout. Please try again.')
+      showError('Unable to start checkout. Please try again.')
     } finally {
       setUpgrading(null)
     }
@@ -354,6 +356,7 @@ export default function BillingPage() {
           </CardContent>
         </Card>
       </div>
+      <AlertSnackbar />
     </DashboardLayout>
   )
 }

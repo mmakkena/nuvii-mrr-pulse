@@ -19,6 +19,8 @@ import { integrationsApi, Integration } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { EmailConfigModal } from '@/components/integrations/email-config-modal'
 import { StripeConnectCard } from '@/components/integrations/stripe-connect-card'
+import { useConfirmationDialog } from '@/components/ui/confirmation-dialog'
+import { useAlertSnackbar } from '@/components/ui/alert-snackbar'
 
 const integrationIcons: Record<string, React.ReactNode> = {
   stripe: (
@@ -50,6 +52,10 @@ export default function IntegrationsPage() {
   const [emailModalOpen, setEmailModalOpen] = useState(false)
   const [configuringIntegration, setConfiguringIntegration] = useState(false)
 
+  // Alert and confirmation dialogs
+  const { confirm, ConfirmationDialog } = useConfirmationDialog()
+  const { showError, showSuccess, showInfo, AlertSnackbar } = useAlertSnackbar()
+
   useEffect(() => {
     if (authLoading || !token) return
 
@@ -71,23 +77,29 @@ export default function IntegrationsPage() {
     try {
       setTestingIntegration(id)
       const result = await integrationsApi.test(id)
-      alert(result.message)
+      showSuccess(result.message)
     } catch (err) {
-      alert('Failed to send test notification')
+      showError('Failed to send test notification')
     } finally {
       setTestingIntegration(null)
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to disconnect this integration?')) return
-
-    try {
-      await integrationsApi.delete(id)
-      setIntegrations((prev) => prev.filter((i) => i.id !== id))
-    } catch (err) {
-      alert('Failed to disconnect integration')
-    }
+  const handleDelete = (id: string) => {
+    confirm(
+      'Disconnect Integration',
+      'Are you sure you want to disconnect this integration? You can reconnect it later.',
+      async () => {
+        try {
+          await integrationsApi.delete(id)
+          setIntegrations((prev) => prev.filter((i) => i.id !== id))
+          showSuccess('Integration disconnected successfully')
+        } catch (err) {
+          showError('Failed to disconnect integration')
+        }
+      },
+      { severity: 'warning', confirmText: 'Disconnect' }
+    )
   }
 
   const handleConnectEmail = async (emails: string[], provider: 'simple' | 'sendgrid' | 'ses') => {
@@ -246,7 +258,7 @@ export default function IntegrationsPage() {
                       <TestTube className="w-4 h-4 mr-1" />
                       {testingIntegration === integration.id ? 'Sending...' : 'Test'}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => alert('Configure integration coming soon')}>
+                    <Button variant="outline" size="sm" onClick={() => showInfo('Configure integration coming soon')}>
                       <Settings className="w-4 h-4 mr-1" />
                       Configure
                     </Button>
@@ -298,7 +310,7 @@ export default function IntegrationsPage() {
                           if (integration.type === 'email') {
                             setEmailModalOpen(true)
                           } else {
-                            alert(`Connect ${integration.name} coming soon`)
+                            showInfo(`Connect ${integration.name} coming soon`)
                           }
                         }}
                       >
@@ -367,7 +379,7 @@ export default function IntegrationsPage() {
               ))}
             </div>
             <div className="mt-4 pt-4 border-t">
-              <Button onClick={() => alert('Channel routing configuration saved')}>Save Routing Configuration</Button>
+              <Button onClick={() => showSuccess('Channel routing configuration saved')}>Save Routing Configuration</Button>
             </div>
           </CardContent>
         </Card>
@@ -378,6 +390,12 @@ export default function IntegrationsPage() {
           onClose={() => setEmailModalOpen(false)}
           onSave={handleConnectEmail}
         />
+
+        {/* Confirmation Dialog */}
+        <ConfirmationDialog />
+
+        {/* Alert Snackbar */}
+        <AlertSnackbar />
       </div>
     </DashboardLayout>
   )

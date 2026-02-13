@@ -17,9 +17,13 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { workspacesApi, WorkspaceResponse, WorkspaceMemberResponse } from '@/lib/api'
+import { useConfirmationDialog } from '@/components/ui/confirmation-dialog'
+import { useAlertSnackbar } from '@/components/ui/alert-snackbar'
 
 export default function SettingsPage() {
   const { workspace: authWorkspace, isLoading: authLoading, user } = useAuth()
+  const { confirm, ConfirmationDialog } = useConfirmationDialog()
+  const { showInfo, showError, AlertSnackbar } = useAlertSnackbar()
   const [activeTab, setActiveTab] = useState('workspace')
   const [workspaceName, setWorkspaceName] = useState('')
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null)
@@ -107,16 +111,22 @@ export default function SettingsPage() {
 
   const handleRemoveMember = async (userId: string) => {
     if (!workspace) return
-    if (!confirm('Are you sure you want to remove this member?')) return
 
-    try {
-      await workspacesApi.removeMember(workspace.id, userId)
-      setMembers(members.filter(m => m.user_id !== userId))
-      setSuccessMessage('Member removed successfully')
-      setTimeout(() => setSuccessMessage(null), 3000)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove member')
-    }
+    confirm(
+      'Remove Member',
+      'Are you sure you want to remove this member from the workspace?',
+      async () => {
+        try {
+          await workspacesApi.removeMember(workspace.id, userId)
+          setMembers(members.filter(m => m.user_id !== userId))
+          setSuccessMessage('Member removed successfully')
+          setTimeout(() => setSuccessMessage(null), 3000)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to remove member')
+        }
+      },
+      { severity: 'error', confirmText: 'Remove' }
+    )
   }
 
   const handleRoleChange = async (userId: string, newRole: string) => {
@@ -242,7 +252,7 @@ export default function SettingsPage() {
                           Permanently delete this workspace and all its data
                         </p>
                       </div>
-                      <Button variant="destructive" onClick={() => alert('Delete workspace functionality coming soon')}>
+                      <Button variant="destructive" onClick={() => showInfo('Delete workspace functionality coming soon')}>
                         Delete Workspace
                       </Button>
                     </div>
@@ -391,7 +401,7 @@ export default function SettingsPage() {
                       </label>
                     </div>
 
-                    <Button onClick={() => alert('Notification settings will be saved')}>
+                    <Button onClick={() => showInfo('Notification settings will be saved')}>
                       Save Notification Settings
                     </Button>
                   </CardContent>
@@ -450,7 +460,7 @@ export default function SettingsPage() {
                       <label className="text-sm font-medium">Confirm New Password</label>
                       <Input type="password" placeholder="Confirm new password" />
                     </div>
-                    <Button onClick={() => alert('Password update coming soon')}>
+                    <Button onClick={() => showInfo('Password update coming soon')}>
                       Update Password
                     </Button>
                   </CardContent>
@@ -469,7 +479,7 @@ export default function SettingsPage() {
                         <p className="font-medium text-slate-900">Two-Factor Authentication</p>
                         <p className="text-sm text-slate-500">Not enabled</p>
                       </div>
-                      <Button onClick={() => alert('2FA setup coming soon')}>Enable 2FA</Button>
+                      <Button onClick={() => showInfo('2FA setup coming soon')}>Enable 2FA</Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -496,7 +506,7 @@ export default function SettingsPage() {
                         </span>
                       </div>
                     </div>
-                    <Button variant="outline" className="mt-4" onClick={() => alert('Sign out all sessions coming soon')}>
+                    <Button variant="outline" className="mt-4" onClick={() => showInfo('Sign out all sessions coming soon')}>
                       Sign Out All Other Sessions
                     </Button>
                   </CardContent>
@@ -561,6 +571,8 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+      <ConfirmationDialog />
+      <AlertSnackbar />
     </DashboardLayout>
   )
 }

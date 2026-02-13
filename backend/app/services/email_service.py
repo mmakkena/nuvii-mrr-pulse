@@ -1,17 +1,74 @@
 """
 Email Service for sending transactional emails (OTP verification, password reset, etc.)
+Uses database-backed templates with workspace-level customization support.
 """
 import logging
-from typing import Optional
+import uuid
+import re
+from typing import Optional, Dict, Any
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models import EmailTemplate, EmailTemplateType
 
 logger = logging.getLogger(__name__)
 
 
-async def send_otp_email(to_email: str, otp_code: str, user_name: str = "User") -> tuple[bool, Optional[str]]:
+async def get_email_template(
+    db: AsyncSession,
+    template_type: EmailTemplateType,
+    workspace_id: Optional[uuid.UUID] = None
+) -> Optional[EmailTemplate]:
+    """
+    Get email template with workspace-level customization.
+    Falls back to global template if workspace-specific template doesn't exist.
+    """
+    # Try workspace-specific template first
+    if workspace_id:
+        result = await db.execute(
+            select(EmailTemplate).where(
+                EmailTemplate.template_type == template_type,
+                EmailTemplate.workspace_id == workspace_id,
+                EmailTemplate.is_active == True
+            )
+        )
+        template = result.scalar_one_or_none()
+        if template:
+            return template
+
+    # Fallback to global template
+    result = await db.execute(
+        select(EmailTemplate).where(
+            EmailTemplate.template_type == template_type,
+            EmailTemplate.workspace_id.is_(None),
+            EmailTemplate.is_active == True
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+def render_template(template_str: str, variables: Dict[str, Any]) -> str:
+    """
+    Simple template rendering using {{variable_name}} syntax.
+    Replaces all {{var}} with values from the variables dict.
+    """
+    def replace_var(match):
+        var_name = match.group(1).strip()
+        value = variables.get(var_name, f"{{{{ {var_name} }}}}")  # Keep placeholder if not found
+        return str(value) if value is not None else ""
+
+    return re.sub(r'\{\{([^}]+)\}\}', replace_var, template_str)
+
+
+async def send_otp_email(
+    to_email: str,
+    otp_code: str,
+    user_name: str = "User",
+    db: Optional[AsyncSession] = None
+) -> tuple[bool, Optional[str]]:
     """Send OTP verification email."""
     if not settings.sendgrid_api_key:
         # In development, just log the OTP
@@ -177,3 +234,82 @@ async def send_welcome_email(to_email: str, user_name: str = "User") -> tuple[bo
     except Exception as e:
         logger.error(f"Failed to send welcome email: {e}")
         return False, str(e)
+
+
+async def send_template_email(
+    db: AsyncSession,
+    to_email: str,
+    template_type: EmailTemplateType,
+    variables: Dict[str, Any],
+    workspace_id: Optional[uuid.UUID] = None
+) -> tuple[bool, Optional[str]]:
+    """
+    Send email using database template with variable substitution.
+    Supports workspace-specific templates with fallback to global templates.
+    """
+    if not settings.sendgrid_api_key:
+        if settings.debug:
+            logger.info(f"[DEBUG] Would send {template_type.value} email to {to_email}")
+            logger.info(f"[DEBUG] Variables: {variables}")
+            return True, None
+        return False, "SendGrid API key not configured"
+
+    # Get template from database
+    template = await get_email_template(db, template_type, workspace_id)
+    if not template:
+        error_msg = f"Email template not found: {template_type.value}"
+        logger.error(error_msg)
+        return False, error_msg
+
+    # Render template with variables
+    subject = render_template(template.subject, variables)
+    html_body = render_template(template.html_body, variables)
+
+    try:
+        message = Mail(
+            from_email=settings.from_email,
+            to_emails=to_email,
+            subject=subject,
+            html_content=html_body
+        )
+
+        sg = SendGridAPIClient(settings.sendgrid_api_key)
+        response = sg.send(message)
+
+        if response.status_code in (200, 201, 202):
+            logger.info(f"{template_type.value} email sent to {to_email}")
+            return True, None
+        else:
+            logger.error(f"SendGrid returned status {response.status_code}")
+            return False, f"SendGrid returned status {response.status_code}"
+    except Exception as e:
+        logger.error(f"Failed to send {template_type.value} email: {e}")
+        return False, str(e)
+
+
+async def send_invitation_email(
+    db: AsyncSession,
+    to_email: str,
+    inviter_name: str,
+    workspace_name: str,
+    invitation_token: str,
+    workspace_id: uuid.UUID,
+    user_name: str = "User"
+) -> tuple[bool, Optional[str]]:
+    """Send workspace invitation email with secure acceptance link."""
+    invitation_link = f"{settings.frontend_url}/accept-invitation?token={invitation_token}"
+
+    variables = {
+        "user_name": user_name,
+        "inviter_name": inviter_name,
+        "workspace_name": workspace_name,
+        "invitation_link": invitation_link,
+    }
+
+    return await send_template_email(
+        db=db,
+        to_email=to_email,
+        template_type=EmailTemplateType.WORKSPACE_INVITATION,
+        variables=variables,
+        workspace_id=workspace_id
+    )

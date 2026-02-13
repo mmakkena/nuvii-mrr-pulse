@@ -1,3 +1,4 @@
+import logging
 import secrets
 import uuid
 from datetime import datetime
@@ -5,7 +6,7 @@ from typing import List
 from urllib.parse import urlencode
 
 import stripe
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -13,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.database import get_db
 from app.models import User, Workspace, WorkspaceMember, StripeAccount
+from app.models.audit import AuditLog
 from app.models.stripe_account import StripeAccountStatus
 from app.models.workspace import WorkspaceRole
 from app.schemas import (
@@ -26,6 +28,31 @@ router = APIRouter()
 
 # Initialize Stripe
 stripe.api_key = settings.stripe_secret_key
+
+# Logger
+logger = logging.getLogger(__name__)
+
+
+def deauthorize_stripe_oauth(stripe_account_id: str, business_name: str = None):
+    """
+    Background task to deauthorize Stripe OAuth connection.
+    This runs asynchronously to avoid blocking the disconnect endpoint.
+    """
+    if not settings.stripe_client_id:
+        logger.info(f"Skipping OAuth deauthorization for {stripe_account_id} - no client_id configured")
+        return
+
+    try:
+        logger.info(f"Deauthorizing Stripe OAuth for account {stripe_account_id} ({business_name})")
+        stripe.OAuth.deauthorize(
+            client_id=settings.stripe_client_id,
+            stripe_user_id=stripe_account_id,
+        )
+        logger.info(f"Successfully deauthorized Stripe OAuth for account {stripe_account_id}")
+    except stripe.error.StripeError as e:
+        logger.error(f"Failed to deauthorize Stripe OAuth for account {stripe_account_id}: {str(e)}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Unexpected error deauthorizing Stripe OAuth for account {stripe_account_id}: {str(e)}", exc_info=True)
 
 
 def stripe_account_to_response(account: StripeAccount) -> StripeAccountResponse:
@@ -305,12 +332,13 @@ async def list_stripe_accounts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all connected Stripe accounts for a workspace."""
+    """List all connected Stripe accounts for a workspace (excluding deleted accounts)."""
     workspace = await get_user_workspace(workspace_id, current_user, db)
 
     result = await db.execute(
         select(StripeAccount)
         .where(StripeAccount.workspace_id == workspace.id)
+        .where(StripeAccount.deleted_at.is_(None))  # Filter out soft-deleted accounts
         .order_by(StripeAccount.connected_at.desc())
     )
     accounts = result.scalars().all()
@@ -337,13 +365,14 @@ async def get_stripe_account(
         select(StripeAccount)
         .options(selectinload(StripeAccount.workspace).selectinload(Workspace.members))
         .where(StripeAccount.id == acc_uuid)
+        .where(StripeAccount.deleted_at.is_(None))  # Filter out soft-deleted accounts
     )
     account = result.scalar_one_or_none()
 
     if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Stripe account not found",
+            detail="Stripe account not found or has been deleted",
         )
 
     # Verify user has access to the workspace
@@ -371,10 +400,11 @@ async def get_stripe_account(
 @router.post("/accounts/{account_id}/disconnect")
 async def disconnect_stripe_account(
     account_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Disconnect a Stripe account from the workspace."""
+    """Disconnect (soft delete) a Stripe account from the workspace."""
     try:
         acc_uuid = uuid.UUID(account_id)
     except ValueError:
@@ -387,13 +417,14 @@ async def disconnect_stripe_account(
         select(StripeAccount)
         .options(selectinload(StripeAccount.workspace).selectinload(Workspace.members))
         .where(StripeAccount.id == acc_uuid)
+        .where(StripeAccount.deleted_at.is_(None))  # Only allow disconnecting non-deleted accounts
     )
     account = result.scalar_one_or_none()
 
     if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Stripe account not found",
+            detail="Stripe account not found or already disconnected",
         )
 
     # Verify user has admin access to the workspace
@@ -404,19 +435,38 @@ async def disconnect_stripe_account(
             detail="You don't have permission to disconnect this account",
         )
 
-    # Deauthorize the OAuth connection if we have a client_id
-    if settings.stripe_client_id:
-        try:
-            stripe.OAuth.deauthorize(
-                client_id=settings.stripe_client_id,
-                stripe_user_id=account.stripe_account_id,
-            )
-        except stripe.error.StripeError:
-            pass  # Continue even if deauthorization fails
+    # Schedule OAuth deauthorization as a background task (non-blocking)
+    background_tasks.add_task(
+        deauthorize_stripe_oauth,
+        account.stripe_account_id,
+        account.business_name
+    )
 
-    # Update account status
+    # Soft delete: Set deleted_at and deleted_by
+    now = datetime.utcnow()
     account.status = StripeAccountStatus.DISCONNECTED
-    account.updated_at = datetime.utcnow()
+    account.deleted_at = now
+    account.deleted_by = current_user.id
+    account.updated_at = now
+    await db.flush()
+
+    # Create audit log entry
+    audit_entry = AuditLog(
+        workspace_id=account.workspace_id,
+        user_id=current_user.id,
+        action="stripe_account.disconnect",
+        resource_type="stripe_account",
+        resource_id=str(account.id),
+        metadata_json={
+            "stripe_account_id": account.stripe_account_id,
+            "business_name": account.business_name,
+            "country": account.country,
+            "currency": account.currency,
+            "deleted_at": now.isoformat(),
+            "deleted_by_email": current_user.email,
+        },
+    )
+    db.add(audit_entry)
     await db.flush()
 
     return {"message": "Stripe account disconnected successfully"}

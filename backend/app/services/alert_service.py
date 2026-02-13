@@ -5,7 +5,7 @@ import uuid
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.models import StripeAccount
 from app.models.alert import Alert, AlertType, AlertSeverity, AlertStatus, AlertDelivery, DeliveryStatus
 from app.models.notification import NotificationChannel, ChannelType
+from app.services.alert_rule_checker import should_create_alert
 
 logger = logging.getLogger(__name__)
 
@@ -293,8 +294,30 @@ async def create_charge_failed_alert(
     db: AsyncSession,
     account: StripeAccount,
     charge: dict,
-) -> Alert:
-    """Create an alert for a failed charge."""
+) -> Optional[Alert]:
+    """
+    Create an alert for a failed charge if alert rules conditions pass.
+
+    Returns:
+        Alert if created, None if conditions didn't pass
+    """
+    # Construct event data for rule evaluation
+    stripe_event = {
+        "type": "charge.failed",
+        "data": {"object": charge}
+    }
+
+    # Check if alert should be created based on configured rules
+    if not await should_create_alert(
+        db=db,
+        stripe_account=account,
+        alert_type=AlertType.PAYMENT_FAILED,
+        stripe_event=stripe_event,
+        event_type="charge.failed"
+    ):
+        logger.info(f"Skipping charge failed alert - conditions not met for amount {charge.get('amount')}")
+        return None
+
     amount = charge.get("amount", 0)
     currency = charge.get("currency", "usd")
     customer_id = charge.get("customer")
@@ -382,8 +405,30 @@ async def create_dispute_alert(
     db: AsyncSession,
     account: StripeAccount,
     dispute: dict,
-) -> Alert:
-    """Create an alert for a new dispute."""
+) -> Optional[Alert]:
+    """
+    Create an alert for a new dispute if alert rules conditions pass.
+
+    Returns:
+        Alert if created, None if conditions didn't pass
+    """
+    # Construct event data for rule evaluation
+    stripe_event = {
+        "type": "charge.dispute.created",
+        "data": {"object": dispute}
+    }
+
+    # Check if alert should be created based on configured rules
+    if not await should_create_alert(
+        db=db,
+        stripe_account=account,
+        alert_type=AlertType.DISPUTE_CREATED,
+        stripe_event=stripe_event,
+        event_type="charge.dispute.created"
+    ):
+        logger.info(f"Skipping dispute alert - conditions not met for amount {dispute.get('amount')}")
+        return None
+
     amount = dispute.get("amount", 0)
     currency = dispute.get("currency", "usd")
     reason = dispute.get("reason", "unknown")

@@ -74,6 +74,10 @@ class WorkspaceMember(Base):
     )
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Invitation token for secure invitation acceptance
+    invitation_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     workspace = relationship("Workspace", back_populates="members")
     user = relationship("User", back_populates="workspace_memberships")

@@ -8,10 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models import User
 from app.models.workspace import Workspace, WorkspacePlan, WorkspaceMember, WorkspaceRole
+from app.services.email_service import send_template_email
+from app.models.email_template import EmailTemplateType
 from app.schemas import (
     UserCreate,
     UserLogin,
@@ -67,6 +70,12 @@ class ResetPasswordRequest(BaseModel):
 
 class GoogleAuthRequest(BaseModel):
     id_token: str
+
+
+class AcceptInvitationRequest(BaseModel):
+    token: str
+    password: str
+    name: str = None  # Optional: user can update their name
 
 
 def user_to_response(user: User) -> UserResponse:
@@ -500,3 +509,87 @@ async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(
     await db.flush()
 
     return {"message": "Password reset successfully"}
+
+
+@router.post("/accept-invitation", response_model=AuthResponse)
+async def accept_invitation(data: AcceptInvitationRequest, db: AsyncSession = Depends(get_db)):
+    """Accept workspace invitation by setting password and completing registration."""
+
+    # Find workspace member by invitation token
+    result = await db.execute(
+        select(WorkspaceMember)
+        .where(WorkspaceMember.invitation_token == data.token)
+        .options(selectinload(WorkspaceMember.user))
+        .options(selectinload(WorkspaceMember.workspace))
+    )
+    member = result.scalar_one_or_none()
+
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invalid invitation token",
+        )
+
+    # Check if invitation has already been accepted
+    if member.joined_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation has already been accepted",
+        )
+
+    # Check if invitation has expired
+    if member.token_expires_at and utc_now() > member.token_expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation has expired",
+        )
+
+    # Validate password
+    if len(data.password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters",
+        )
+
+    # Get the user
+    user = member.user
+
+    # Update user: set password, verify email, optionally update name
+    user.password_hash = hash_password(data.password)
+    user.email_verified = True
+    if data.name:
+        user.name = data.name
+    user.updated_at = datetime.utcnow()
+
+    # Update membership: mark as joined, clear invitation token
+    member.joined_at = utc_now()
+    member.invitation_token = None
+    member.token_expires_at = None
+
+    await db.commit()
+    await db.refresh(user)
+    await db.refresh(member)
+
+    # Send welcome email
+    await send_template_email(
+        db=db,
+        to_email=user.email,
+        template_type=EmailTemplateType.WELCOME,
+        variables={
+            "user_name": user.name,
+            "dashboard_url": f"{settings.frontend_url}/dashboard",
+        },
+        workspace_id=member.workspace_id
+    )
+
+    # Create auth tokens
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
+
+    return AuthResponse(
+        user=user_to_response(user),
+        tokens=TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+        ),
+    )

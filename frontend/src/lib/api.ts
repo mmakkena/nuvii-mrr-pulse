@@ -265,6 +265,13 @@ export const authApi = {
       body: JSON.stringify({ token, new_password: newPassword }),
       skipAuth: true,
     }),
+
+  acceptInvitation: (data: { token: string; password: string; name?: string }) =>
+    fetchApi<{ user: any; tokens: { access_token: string; refresh_token: string } }>('/api/auth/accept-invitation', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      skipAuth: true,
+    }),
 }
 
 // Workspace Types
