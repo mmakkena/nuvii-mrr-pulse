@@ -1,48 +1,28 @@
-# MRRPulse Terraform Variables Example
-# Copy this file to terraform.tfvars and fill in your values
+# MRR Pulse Terraform Variables
+# Copy this file to terraform.tfvars and fill in your actual values
 
 # AWS Configuration
 aws_region  = "us-east-1"
 environment = "prod"
 
-# VPC Configuration
-vpc_cidr           = "10.0.0.0/16"
-availability_zones = ["us-east-1a", "us-east-1b"]
-
-# ECS Configuration
-backend_cpu           = 512
-backend_memory        = 1024
-backend_desired_count = 2
-
-frontend_cpu           = 256
-frontend_memory        = 512
-frontend_desired_count = 2
-
-# RDS Configuration
-db_instance_class    = "db.t3.micro"
-db_allocated_storage = 20
-db_name              = "mrrpulse"
-db_username          = "mrrpulse"
-
-# Domain Configuration (optional - leave empty to use ALB DNS)
-domain_name     = ""
-certificate_arn = ""
-
 # Required Secrets
-jwt_secret                    = "your-secure-jwt-secret-here"
-stripe_secret_key             = "sk_live_xxx"
-stripe_webhook_signing_secret = "whsec_xxx"
-stripe_client_id              = "ca_xxx"
+jwt_secret                    = "your-jwt-secret-here"
+stripe_secret_key             = "sk_test_..."
+stripe_webhook_signing_secret = "whsec_..."
+stripe_client_id              = "ca_..."  # ← ADD THIS! Get from Stripe Dashboard
 fernet_key                    = "your-fernet-key-here"
 
-# Optional Integrations
+# Optional: Stripe Billing (for MRRPulse subscriptions)
+stripe_publishable_key = "pk_test_..."
+
+# Optional: Email/SMS
 sendgrid_api_key    = ""
 twilio_account_sid  = ""
 twilio_auth_token   = ""
 twilio_phone_number = ""
+from_email          = "alerts@mrrpulse.com"
 
-# Cost Optimization (for dev/staging environments)
-# Enabling these can reduce costs by ~50-60% but with trade-offs
-single_nat_gateway         = false  # true saves ~$32/month, reduces HA
-use_fargate_spot           = false  # true saves up to 70% on compute, may be interrupted
-enable_deletion_protection = true   # false for dev environments
+# Cost Optimization (adjust based on environment)
+use_secrets_manager = false  # Set to true for production
+use_private_subnets = false  # false = no NAT gateways (~$90/month saved); use SSM bastion for DB access
+use_fargate_spot    = false  # Set to true for non-critical workloads

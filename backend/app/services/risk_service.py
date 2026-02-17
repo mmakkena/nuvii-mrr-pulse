@@ -11,16 +11,19 @@ Optimized for low latency with parallel database queries.
 """
 import asyncio
 import logging
+import uuid as uuid_mod
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import StripeAccount, StripeEvent
 from app.models.risk import RiskState, RiskLevel, PayoutHealth
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,36 +34,38 @@ VELOCITY_WARNING_MULTIPLIER = Decimal("2.0")  # 200% of baseline
 VELOCITY_DANGER_MULTIPLIER = Decimal("3.0")   # 300% of baseline
 REFUND_BURST_COUNT = 5                        # N refunds triggers alert
 REFUND_BURST_WINDOW_MINUTES = 60              # in M minutes
+REVENUE_ALERT_COOLDOWN_HOURS = 6              # cooldown between revenue alerts
+PAYOUT_DELAY_MULTIPLIER = Decimal("1.5")      # alert when hours > interval * 1.5
+MIN_PAYOUTS_FOR_INTERVAL = 3                  # minimum payouts to compute interval
 
 
 async def get_or_create_risk_state(
     db: AsyncSession,
     stripe_account_id: UUID,
 ) -> RiskState:
-    """Get existing risk state or create a new one for the Stripe account."""
+    """Get existing risk state or create a new one using INSERT ... ON CONFLICT DO NOTHING."""
+    stmt = pg_insert(RiskState).values(
+        id=uuid_mod.uuid4(),
+        stripe_account_id=stripe_account_id,
+        dispute_rate_30d=Decimal("0"),
+        disputes_count_30d=0,
+        successful_charges_30d=0,
+        velocity_score=Decimal("1.0"),
+        velocity_baseline=Decimal("0"),
+        refund_burst_score=0,
+        refund_burst_window_minutes=REFUND_BURST_WINDOW_MINUTES,
+        payout_health=PayoutHealth.UNKNOWN,
+        overall_status=RiskLevel.NORMAL,
+    ).on_conflict_do_nothing(
+        index_elements=["stripe_account_id"],
+    )
+    await db.execute(stmt)
+    await db.flush()
+
     result = await db.execute(
         select(RiskState).where(RiskState.stripe_account_id == stripe_account_id)
     )
-    risk_state = result.scalar_one_or_none()
-
-    if not risk_state:
-        risk_state = RiskState(
-            stripe_account_id=stripe_account_id,
-            dispute_rate_30d=Decimal("0"),
-            disputes_count_30d=0,
-            successful_charges_30d=0,
-            velocity_score=Decimal("1.0"),
-            velocity_baseline=Decimal("0"),
-            refund_burst_score=0,
-            refund_burst_window_minutes=REFUND_BURST_WINDOW_MINUTES,
-            payout_health=PayoutHealth.UNKNOWN,
-            overall_status=RiskLevel.NORMAL,
-        )
-        db.add(risk_state)
-        await db.flush()
-        await db.refresh(risk_state)
-
-    return risk_state
+    return result.scalar_one()
 
 
 async def _count_events(
@@ -68,22 +73,19 @@ async def _count_events(
     stripe_account_id: UUID,
     event_types: list[str],
     since: datetime,
+    until: Optional[datetime] = None,
 ) -> int:
-    """Count events of specified types since a given time."""
-    if len(event_types) == 1:
-        result = await db.execute(
-            select(func.count(StripeEvent.id))
-            .where(StripeEvent.stripe_account_id == stripe_account_id)
-            .where(StripeEvent.event_type == event_types[0])
-            .where(StripeEvent.created_at >= since)
-        )
-    else:
-        result = await db.execute(
-            select(func.count(StripeEvent.id))
-            .where(StripeEvent.stripe_account_id == stripe_account_id)
-            .where(StripeEvent.event_type.in_(event_types))
-            .where(StripeEvent.created_at >= since)
-        )
+    """Count events of specified types between since and until (defaults to now)."""
+    base = (
+        select(func.count(StripeEvent.id))
+        .where(StripeEvent.stripe_account_id == stripe_account_id)
+        .where(StripeEvent.event_type.in_(event_types) if len(event_types) > 1
+               else StripeEvent.event_type == event_types[0])
+        .where(StripeEvent.created_at >= since)
+    )
+    if until is not None:
+        base = base.where(StripeEvent.created_at < until)
+    result = await db.execute(base)
     return result.scalar() or 0
 
 
@@ -119,26 +121,33 @@ async def _calculate_velocity_metrics(
     """
     Calculate velocity baseline and current score with parallel queries.
 
-    Baseline: average charges per hour over last 7 days
-    Current: charges in last 1 hour
-    Score: current / baseline (1.0 = normal)
+    Baseline: average charges per hour over [7 days ago → 1 hour ago]
+              (excludes the current hour to prevent first-payment false positives)
+    Current:  charges in the last 1 hour
+    Score:    current / baseline  (1.0 = normal)
 
-    Returns: (velocity_baseline, velocity_score)
+    Returns (velocity_baseline, velocity_score).
+    Velocity scoring is suppressed (score=1.0) until there are at least
+    MIN_BASELINE_CHARGES historical events, avoiding false spikes for new accounts.
     """
     now = datetime.utcnow()
     seven_days_ago = now - timedelta(days=7)
     one_hour_ago = now - timedelta(hours=1)
     charge_types = ["charge.succeeded", "charge.failed"]
 
-    # Run both counts in parallel
-    total_charges_7d, current_charges = await asyncio.gather(
-        _count_events(db, stripe_account_id, charge_types, seven_days_ago),
+    # Baseline uses [7d ago → 1h ago]; current uses [1h ago → now]
+    historical_charges, current_charges = await asyncio.gather(
+        _count_events(db, stripe_account_id, charge_types, seven_days_ago, until=one_hour_ago),
         _count_events(db, stripe_account_id, charge_types, one_hour_ago),
     )
 
-    velocity_baseline = Decimal(total_charges_7d) / Decimal(7 * 24)
+    # Not enough history — suppress velocity scoring to avoid new-account false positives
+    if historical_charges < settings.velocity_min_baseline_charges:
+        return Decimal("0"), Decimal("1.0")
 
-    # Calculate score (avoid division by zero)
+    # Baseline window is (7*24 - 1) hours = 167 hours
+    velocity_baseline = Decimal(historical_charges) / Decimal(7 * 24 - 1)
+
     if velocity_baseline > 0:
         velocity_score = Decimal(current_charges) / velocity_baseline
     else:
@@ -348,6 +357,13 @@ async def update_risk_for_charge_succeeded(
             dispute_metrics=dispute_metrics,
             velocity_metrics=velocity_metrics,
         )
+
+        # Check revenue anomaly (baseline-driven)
+        await _check_revenue_anomaly(db, account, risk_state)
+
+        # Check payout delay during normal charge flow
+        await _check_payout_delayed(db, account, risk_state)
+
         return risk_state
 
     except Exception as e:
@@ -464,6 +480,14 @@ async def update_risk_for_payout(
         if success:
             risk_state.payout_health = PayoutHealth.HEALTHY
             risk_state.last_payout_at = datetime.utcnow()
+
+            # Recalculate expected payout interval from history
+            interval = await _calculate_payout_interval(db, account.id)
+            if interval is not None:
+                risk_state.expected_payout_interval_hours = Decimal(str(round(interval, 2)))
+                risk_state.last_payout_expected_at = (
+                    datetime.utcnow() + timedelta(hours=interval)
+                )
         else:
             risk_state.payout_health = PayoutHealth.FAILED
 
@@ -481,6 +505,163 @@ async def update_risk_for_payout(
     except Exception as e:
         logger.error(f"Error updating risk for payout: {e}")
         raise
+
+
+async def _check_revenue_anomaly(
+    db: AsyncSession,
+    account: StripeAccount,
+    risk_state: RiskState,
+) -> None:
+    """
+    Check if today's revenue is anomalous relative to the 30-day baseline.
+    Creates revenue_drop or revenue_spike alerts with cooldown.
+    """
+    from app.services import baseline_service, alert_service, metrics_service
+    from app.models.baseline import MetricType
+    from app.models.alert import Alert, AlertType, AlertStatus
+
+    try:
+        # Get today's revenue from MetricsDaily
+        daily = await metrics_service.get_or_create_daily_metrics(db, account.id)
+        current_revenue = float(daily.revenue)
+
+        # Recompute baseline for revenue
+        await baseline_service.recompute_baseline(db, account.id, MetricType.REVENUE)
+
+        # Check for anomaly against 30-day baseline
+        result = await baseline_service.check_anomaly(
+            db, account.id, MetricType.REVENUE, current_revenue, use_30d=True
+        )
+
+        if not result.is_anomaly:
+            return
+
+        # Cooldown check: no existing revenue alert in last N hours
+        cooldown_since = datetime.utcnow() - timedelta(hours=REVENUE_ALERT_COOLDOWN_HOURS)
+        alert_type = AlertType.REVENUE_DROP if result.direction == "drop" else AlertType.REVENUE_SPIKE
+
+        existing = await db.execute(
+            select(func.count(Alert.id))
+            .where(Alert.stripe_account_id == account.id)
+            .where(Alert.alert_type == alert_type)
+            .where(Alert.created_at >= cooldown_since)
+            .where(Alert.status.in_([AlertStatus.PENDING, AlertStatus.SENT]))
+        )
+        if existing.scalar() > 0:
+            logger.info(f"Revenue alert cooldown active for {account.stripe_account_id}")
+            return
+
+        # Create the appropriate alert
+        if result.direction == "drop":
+            await alert_service.create_revenue_drop_alert(
+                db, account, current_revenue, result.baseline_mean, result.z_score
+            )
+        else:
+            await alert_service.create_revenue_spike_alert(
+                db, account, current_revenue, result.baseline_mean, result.z_score
+            )
+
+        logger.info(
+            f"Revenue {result.direction} alert created for {account.stripe_account_id}: "
+            f"z={result.z_score:.2f}, current={current_revenue}, mean={result.baseline_mean}"
+        )
+
+    except Exception as e:
+        logger.error(f"Error checking revenue anomaly: {e}")
+
+
+async def _calculate_payout_interval(
+    db: AsyncSession,
+    stripe_account_id: UUID,
+) -> Optional[float]:
+    """
+    Calculate average payout interval in hours from last 10 payout.paid events.
+    Returns None if fewer than MIN_PAYOUTS_FOR_INTERVAL payouts.
+    """
+    result = await db.execute(
+        select(StripeEvent.created_at)
+        .where(StripeEvent.stripe_account_id == stripe_account_id)
+        .where(StripeEvent.event_type == "payout.paid")
+        .order_by(StripeEvent.created_at.desc())
+        .limit(10)
+    )
+    timestamps = [row[0] for row in result.all()]
+
+    if len(timestamps) < MIN_PAYOUTS_FOR_INTERVAL:
+        return None
+
+    # Calculate intervals between consecutive payouts
+    intervals = []
+    for i in range(len(timestamps) - 1):
+        delta = timestamps[i] - timestamps[i + 1]  # timestamps are desc order
+        intervals.append(delta.total_seconds() / 3600)
+
+    if not intervals:
+        return None
+
+    return sum(intervals) / len(intervals)
+
+
+async def _check_payout_delayed(
+    db: AsyncSession,
+    account: StripeAccount,
+    risk_state: RiskState,
+) -> None:
+    """
+    Check if payout is overdue based on historical payout interval.
+    Sets PayoutHealth.DELAYED and creates alert on transition.
+    """
+    from app.services import alert_service
+    from app.models.alert import Alert, AlertType, AlertStatus
+
+    try:
+        if not risk_state.last_payout_at:
+            return
+
+        expected_hours = risk_state.expected_payout_interval_hours
+        if not expected_hours:
+            return
+
+        expected_hours_float = float(expected_hours)
+        now_utc = datetime.utcnow()
+        last_payout = risk_state.last_payout_at
+        # Handle timezone-aware vs naive datetime comparison
+        if last_payout.tzinfo is not None:
+            from datetime import timezone
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+        hours_since_payout = (now_utc - last_payout).total_seconds() / 3600
+
+        threshold_hours = expected_hours_float * float(PAYOUT_DELAY_MULTIPLIER)
+
+        if hours_since_payout <= threshold_hours:
+            return
+
+        # Only alert on transition to DELAYED
+        if risk_state.payout_health == PayoutHealth.DELAYED:
+            return
+
+        risk_state.payout_health = PayoutHealth.DELAYED
+        risk_state.overall_status = _determine_overall_status(
+            risk_state.dispute_rate_30d,
+            risk_state.velocity_score,
+            risk_state.refund_burst_score,
+            risk_state.payout_health,
+        )
+
+        hours_overdue = hours_since_payout - expected_hours_float
+        await alert_service.create_payout_delayed_alert(
+            db, account, hours_overdue, expected_hours_float, risk_state.last_payout_at
+        )
+
+        await db.flush()
+
+        logger.info(
+            f"Payout delayed alert for {account.stripe_account_id}: "
+            f"{hours_overdue:.0f}h overdue (expected every {expected_hours_float:.0f}h)"
+        )
+
+    except Exception as e:
+        logger.error(f"Error checking payout delay: {e}", exc_info=True)
 
 
 async def recalculate_all_metrics(

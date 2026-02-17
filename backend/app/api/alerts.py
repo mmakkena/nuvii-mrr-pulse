@@ -96,6 +96,7 @@ def map_alert_type(db_type: DBAlertType) -> SchemaAlertType:
         DBAlertType.REVENUE_DROP: SchemaAlertType.risk_warning,
         DBAlertType.REVENUE_SPIKE: SchemaAlertType.revenue_milestone,
         DBAlertType.PAYOUT_FAILED: SchemaAlertType.payout_failed,
+        DBAlertType.PAYOUT_DELAYED: SchemaAlertType.payout_failed,
         DBAlertType.VELOCITY_SPIKE: SchemaAlertType.risk_warning,
         DBAlertType.MILESTONE: SchemaAlertType.revenue_milestone,
     }

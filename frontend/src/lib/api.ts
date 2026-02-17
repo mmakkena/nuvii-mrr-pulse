@@ -422,6 +422,17 @@ export const integrationsApi = {
 }
 
 // Stripe Connect API
+export interface StripeAccountResponse {
+  id: string
+  stripe_account_id: string
+  business_name: string | null
+  currency: string
+  country: string
+  status: string
+  connected_at: string
+  deleted_at: string | null
+}
+
 export const stripeConnectApi = {
   startConnect: (workspaceId: string) =>
     fetchApi<{ authorization_url: string; state: string }>(
@@ -469,6 +480,50 @@ export const billingApi = {
 // Dashboard API
 export const dashboardApi = {
   getStats: (): Promise<DashboardStats> => fetchApi<DashboardStats>('/api/dashboard/stats'),
+}
+
+// Metrics / Analytics Types
+export interface MetricsDailyData {
+  date: string
+  revenue: number
+  refunds_count: number
+  refunds_amount: number
+  disputes_count: number
+  failures_count: number
+  cancellations_count: number
+  successful_charges_count: number
+  new_subscriptions_count: number
+  mrr: number
+}
+
+export interface MetricsHistoryResponse {
+  days: number
+  data: MetricsDailyData[]
+}
+
+export interface BaselineMetric {
+  metric_type: string
+  rolling_mean_7d: number
+  rolling_std_7d: number
+  sample_count_7d: number
+  rolling_mean_30d: number
+  rolling_std_30d: number
+  sample_count_30d: number
+  z_score_threshold: number
+  last_computed_at: string | null
+}
+
+export interface MetricsBaselinesResponse {
+  baselines: BaselineMetric[]
+}
+
+// Metrics API
+export const metricsApi = {
+  getHistory: (days?: number) =>
+    fetchApi<MetricsHistoryResponse>(`/api/metrics/history${days ? `?days=${days}` : ''}`),
+
+  getBaselines: () =>
+    fetchApi<MetricsBaselinesResponse>('/api/metrics/baselines'),
 }
 
 // Convenience exports for direct function access

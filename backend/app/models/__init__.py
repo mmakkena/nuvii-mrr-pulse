@@ -8,6 +8,7 @@ from app.models.risk import RiskState
 from app.models.billing import Subscription, Invoice
 from app.models.audit import AuditLog
 from app.models.email_template import EmailTemplate, EmailTemplateType
+from app.models.baseline import MetricsBaseline, MetricType
 
 __all__ = [
     "User",
@@ -28,4 +29,6 @@ __all__ = [
     "AuditLog",
     "EmailTemplate",
     "EmailTemplateType",
+    "MetricsBaseline",
+    "MetricType",
 ]

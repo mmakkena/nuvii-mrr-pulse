@@ -192,30 +192,34 @@ async def get_risk_status(
     if not risk_states:
         return get_default_risk_response()
 
+    # Severity ordering for enums (string values don't sort correctly)
+    risk_level_order = {RiskLevel.NORMAL: 0, RiskLevel.WARNING: 1, RiskLevel.DANGER: 2}
+    payout_health_order = {PayoutHealth.HEALTHY: 0, PayoutHealth.UNKNOWN: 0, PayoutHealth.DELAYED: 1, PayoutHealth.FAILED: 2}
+
     # Aggregate risk states (use worst case for each metric)
     worst_overall = RiskLevel.NORMAL
     highest_dispute_rate = 0.0
-    highest_refund_rate = 0.0
+    highest_refund_burst = 0
     worst_velocity_deviation = 0.0
     worst_payout_health = PayoutHealth.HEALTHY
     latest_payout = None
 
     for state in risk_states:
-        if state.overall_status.value > worst_overall.value:
+        if risk_level_order.get(state.overall_status, 0) > risk_level_order.get(worst_overall, 0):
             worst_overall = state.overall_status
 
         if state.dispute_rate_30d and float(state.dispute_rate_30d) > highest_dispute_rate:
             highest_dispute_rate = float(state.dispute_rate_30d)
 
-        if state.refund_burst_score and float(state.refund_burst_score) > highest_refund_rate:
-            highest_refund_rate = float(state.refund_burst_score)
+        if state.refund_burst_score and state.refund_burst_score > highest_refund_burst:
+            highest_refund_burst = state.refund_burst_score
 
         if state.velocity_score:
             deviation = abs(float(state.velocity_score) - 1.0) * 100
             if deviation > worst_velocity_deviation:
                 worst_velocity_deviation = deviation
 
-        if state.payout_health.value > worst_payout_health.value:
+        if payout_health_order.get(state.payout_health, 0) > payout_health_order.get(worst_payout_health, 0):
             worst_payout_health = state.payout_health
 
         if state.last_payout_at:
@@ -252,8 +256,8 @@ async def get_risk_status(
             trend="up" if highest_dispute_rate > 0 else "stable",
         ),
         refund_rate=RiskMetric(
-            current=round(highest_refund_rate * 100, 2),
-            previous=round(highest_refund_rate * 100 * 0.9, 2),
+            current=float(highest_refund_burst),
+            previous=float(highest_refund_burst) * 0.9,
             threshold_warning=5.0,
             threshold_critical=10.0,
             trend="stable",
@@ -327,8 +331,10 @@ async def get_risk_history(
         AlertType.DISPUTE_RATE_WARNING,
         AlertType.DISPUTE_RATE_CRITICAL,
         AlertType.PAYOUT_FAILED,
+        AlertType.PAYOUT_DELAYED,
         AlertType.REFUND_SPIKE,
         AlertType.REVENUE_DROP,
+        AlertType.REVENUE_SPIKE,
         AlertType.VELOCITY_SPIKE,
     ]
 
@@ -347,8 +353,10 @@ async def get_risk_history(
         AlertType.DISPUTE_RATE_WARNING: RiskEventType.dispute_rate,
         AlertType.DISPUTE_RATE_CRITICAL: RiskEventType.dispute_rate,
         AlertType.PAYOUT_FAILED: RiskEventType.payout,
+        AlertType.PAYOUT_DELAYED: RiskEventType.payout,
         AlertType.REFUND_SPIKE: RiskEventType.refund_rate,
         AlertType.REVENUE_DROP: RiskEventType.velocity,
+        AlertType.REVENUE_SPIKE: RiskEventType.velocity,
         AlertType.VELOCITY_SPIKE: RiskEventType.velocity,
     }
 

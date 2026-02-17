@@ -38,6 +38,8 @@ from app.models import (
     Subscription,
     Invoice,
     AuditLog,
+    MetricsBaseline,
+    MetricType,
 )
 
 target_metadata = Base.metadata

@@ -771,6 +771,114 @@ async def create_velocity_spike_alert(
     )
 
 
+async def create_revenue_drop_alert(
+    db: AsyncSession,
+    account: StripeAccount,
+    current_revenue: float,
+    baseline_mean: float,
+    z_score: float,
+    window: str = "30d",
+) -> Alert:
+    """Create alert when revenue drops significantly below baseline."""
+    deviation_percent = ((current_revenue - baseline_mean) / baseline_mean * 100) if baseline_mean else 0
+    severity = AlertSeverity.CRITICAL if abs(z_score) >= 3.0 else AlertSeverity.WARNING
+
+    title = f"Revenue Drop: {deviation_percent:.0f}% below baseline"
+    body = (
+        f"Today's revenue (${current_revenue:,.2f}) is {abs(deviation_percent):.0f}% below "
+        f"the {window} baseline of ${baseline_mean:,.2f}. "
+        f"Z-score: {z_score:.2f}. This may indicate a payment processing issue or customer churn."
+    )
+
+    return await create_alert(
+        db=db,
+        workspace_id=account.workspace_id,
+        stripe_account_id=account.id,
+        alert_type=AlertType.REVENUE_DROP,
+        severity=severity,
+        title=title,
+        body=body,
+        metadata={
+            "current_value": current_revenue,
+            "baseline_mean": baseline_mean,
+            "z_score": z_score,
+            "deviation_percent": deviation_percent,
+            "window": window,
+        },
+    )
+
+
+async def create_revenue_spike_alert(
+    db: AsyncSession,
+    account: StripeAccount,
+    current_revenue: float,
+    baseline_mean: float,
+    z_score: float,
+    window: str = "30d",
+) -> Alert:
+    """Create alert when revenue spikes significantly above baseline."""
+    deviation_percent = ((current_revenue - baseline_mean) / baseline_mean * 100) if baseline_mean else 0
+    severity = AlertSeverity.WARNING if z_score >= 3.0 else AlertSeverity.INFO
+
+    title = f"Revenue Spike: {deviation_percent:.0f}% above baseline"
+    body = (
+        f"Today's revenue (${current_revenue:,.2f}) is {deviation_percent:.0f}% above "
+        f"the {window} baseline of ${baseline_mean:,.2f}. "
+        f"Z-score: {z_score:.2f}."
+    )
+
+    return await create_alert(
+        db=db,
+        workspace_id=account.workspace_id,
+        stripe_account_id=account.id,
+        alert_type=AlertType.REVENUE_SPIKE,
+        severity=severity,
+        title=title,
+        body=body,
+        metadata={
+            "current_value": current_revenue,
+            "baseline_mean": baseline_mean,
+            "z_score": z_score,
+            "deviation_percent": deviation_percent,
+            "window": window,
+        },
+    )
+
+
+async def create_payout_delayed_alert(
+    db: AsyncSession,
+    account: StripeAccount,
+    hours_overdue: float,
+    expected_interval_hours: float,
+    last_payout_at: datetime,
+) -> Alert:
+    """Create alert when payout is significantly overdue."""
+    severity = AlertSeverity.CRITICAL if hours_overdue > expected_interval_hours * 2 else AlertSeverity.WARNING
+
+    title = f"Payout Delayed: {hours_overdue:.0f}h overdue"
+    body = (
+        f"No payout received in {hours_overdue:.0f} hours. "
+        f"Expected interval: {expected_interval_hours:.0f} hours. "
+        f"Last payout: {last_payout_at.strftime('%Y-%m-%d %H:%M UTC')}. "
+        f"This may indicate a hold on your Stripe account."
+    )
+
+    return await create_alert(
+        db=db,
+        workspace_id=account.workspace_id,
+        stripe_account_id=account.id,
+        alert_type=AlertType.PAYOUT_DELAYED,
+        severity=severity,
+        title=title,
+        body=body,
+        metadata={
+            "hours_overdue": hours_overdue,
+            "expected_interval_hours": expected_interval_hours,
+            "last_payout_at": last_payout_at.isoformat(),
+        },
+    )
+
+
 async def create_refund_burst_alert(
     db: AsyncSession,
     account: StripeAccount,

@@ -16,9 +16,11 @@ import {
   Loader2,
 } from 'lucide-react'
 import { formatCurrency, formatRelativeTime } from '@/lib/utils'
-import { alertsApi, riskApi, dashboardApi, Alert, RiskStatus, DashboardStats } from '@/lib/api'
+import { alertsApi, riskApi, dashboardApi, stripeConnectApi, Alert, RiskStatus, DashboardStats } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useAlertSnackbar } from '@/components/ui/alert-snackbar'
+import { StripeConnectPrompt } from '@/components/ui/stripe-connect-prompt'
+import { StripeConnectionBanner } from '@/components/ui/stripe-connection-banner'
 import Link from 'next/link'
 
 function getSeverityColor(severity: string) {
@@ -57,29 +59,59 @@ function getRiskBorderColor(status: string) {
 }
 
 export default function DashboardPage() {
-  const { isLoading: authLoading, token } = useAuth()
+  const { isLoading: authLoading, token, workspace } = useAuth()
   const { showError, showSuccess, AlertSnackbar } = useAlertSnackbar()
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [riskStatus, setRiskStatus] = useState<RiskStatus | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showStripePrompt, setShowStripePrompt] = useState(false)
+  const [hasStripeAccount, setHasStripeAccount] = useState<boolean | null>(null)
+  const [stripeBusinessName, setStripeBusinessName] = useState<string | null>(null)
+
+  const workspaceId = workspace?.id
 
   useEffect(() => {
     // Don't fetch if still checking auth or not authenticated
-    if (authLoading || !token) return
+    if (authLoading || !token || !workspaceId) return
 
     async function fetchData() {
       try {
         setLoading(true)
+
+        // Fetch dashboard data
         const [alertsRes, riskRes, statsRes] = await Promise.all([
           alertsApi.list({ page_size: 5 }),
           riskApi.getStatus(),
           dashboardApi.getStats(),
         ])
+
         setAlerts(alertsRes.alerts)
         setRiskStatus(riskRes)
         setStats(statsRes)
+
+        // Check Stripe connection if workspace is available
+        if (workspaceId) {
+          try {
+            const stripeAccounts = await stripeConnectApi.listAccounts(workspaceId)
+            const hasAccount = stripeAccounts.length > 0
+            setHasStripeAccount(hasAccount)
+            if (hasAccount) {
+              setStripeBusinessName(stripeAccounts[0].business_name)
+            }
+
+            if (!hasAccount && !sessionStorage.getItem('stripe_prompt_dismissed')) {
+              setShowStripePrompt(true)
+            }
+          } catch (err) {
+            console.error('Failed to check Stripe accounts:', err)
+            setHasStripeAccount(false)
+            if (!sessionStorage.getItem('stripe_prompt_dismissed')) {
+              setShowStripePrompt(true)
+            }
+          }
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data')
       } finally {
@@ -87,7 +119,7 @@ export default function DashboardPage() {
       }
     }
     fetchData()
-  }, [authLoading, token])
+  }, [authLoading, token, workspaceId])
 
   // Show loading while checking auth
   if (authLoading) {
@@ -176,6 +208,15 @@ export default function DashboardPage() {
       <Header title="Dashboard" description="Overview of your Stripe metrics and alerts" />
 
       <div className="p-6 space-y-6">
+        {/* Stripe Connection Status */}
+        {hasStripeAccount !== null && workspaceId && (
+          <StripeConnectionBanner
+            connected={hasStripeAccount}
+            workspaceId={workspaceId}
+            businessName={stripeBusinessName}
+          />
+        )}
+
         {/* Risk Status Banner */}
         {riskStatus && (
           <Card className={`border-l-4 ${getRiskBorderColor(riskStatus.overall)}`}>
@@ -385,6 +426,20 @@ export default function DashboardPage() {
         </div>
       </div>
       <AlertSnackbar />
+
+      {/* Stripe Connect Prompt */}
+      {workspaceId && hasStripeAccount === false && (
+        <StripeConnectPrompt
+          open={showStripePrompt}
+          onClose={() => {
+            setShowStripePrompt(false)
+            sessionStorage.setItem('stripe_prompt_dismissed', 'true')
+          }}
+          workspaceId={workspaceId}
+          title="Connect Your Stripe Account"
+          message="To view your payment data, MRR trends, and set up alerts, connect your Stripe account first."
+        />
+      )}
     </DashboardLayout>
   )
 }

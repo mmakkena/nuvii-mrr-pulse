@@ -35,6 +35,7 @@ def get_alert_emoji(alert_type: AlertType) -> str:
         AlertType.REVENUE_DROP: "📉",
         AlertType.REVENUE_SPIKE: "📈",
         AlertType.PAYOUT_FAILED: "💳",
+        AlertType.PAYOUT_DELAYED: "⏳",
         AlertType.VELOCITY_SPIKE: "⚡",
         AlertType.MILESTONE: "🎉",
     }

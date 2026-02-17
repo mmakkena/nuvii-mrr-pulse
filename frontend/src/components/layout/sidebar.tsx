@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import {
   LayoutDashboard,
+  BarChart3,
   Bell,
   Settings,
   CreditCard,
@@ -29,6 +30,7 @@ import { useAuth } from '@/lib/auth'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Analytics', href: '/analytics', icon: BarChart3 },
   { name: 'Alerts', href: '/alerts', icon: Bell },
   { name: 'Rules', href: '/rules', icon: BookOpen },
   { name: 'Risk', href: '/risk', icon: Shield },

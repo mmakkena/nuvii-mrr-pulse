@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, Integer
+from sqlalchemy import DateTime, ForeignKey, Numeric, Integer, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -11,6 +11,12 @@ from app.database import Base
 
 class MetricsHourly(Base):
     __tablename__ = "metrics_hourly"
+    __table_args__ = (
+        UniqueConstraint(
+            "stripe_account_id", "period_start",
+            name="uq_metrics_hourly_account_period",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -38,6 +44,12 @@ class MetricsHourly(Base):
 
 class MetricsDaily(Base):
     __tablename__ = "metrics_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "stripe_account_id", "period_start",
+            name="uq_metrics_daily_account_period",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4

@@ -5,6 +5,10 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
+if settings.otel_enabled:
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+    SQLAlchemyInstrumentor().instrument()
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,

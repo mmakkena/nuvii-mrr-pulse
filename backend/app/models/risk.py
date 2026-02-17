@@ -43,6 +43,12 @@ class RiskState(Base):
         SQLEnum(PayoutHealth), default=PayoutHealth.UNKNOWN
     )
     last_payout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expected_payout_interval_hours: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 2), nullable=True
+    )
+    last_payout_expected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     overall_status: Mapped[RiskLevel] = mapped_column(
         SQLEnum(RiskLevel), default=RiskLevel.NORMAL
     )

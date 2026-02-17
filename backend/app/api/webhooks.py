@@ -1,5 +1,3 @@
-import asyncio
-import json
 import logging
 from datetime import datetime
 from typing import Optional
@@ -168,6 +166,9 @@ async def process_event(
         elif event_type == "charge.dispute.created":
             await handle_dispute_created(db, stripe_account, data)
 
+        elif event_type == "charge.dispute.updated":
+            await handle_dispute_updated(db, stripe_account, data)
+
         elif event_type == "charge.dispute.closed":
             await handle_dispute_closed(db, stripe_account, data)
 
@@ -195,9 +196,19 @@ async def process_event(
         elif event_type == "payout.failed":
             await handle_payout_failed(db, stripe_account, data)
 
+        elif event_type == "payout.canceled":
+            await handle_payout_canceled(db, stripe_account, data)
+
+        # Balance events
+        elif event_type == "balance.available":
+            await handle_balance_available(db, stripe_account, data)
+
         # Account events
         elif event_type == "account.updated":
             await handle_account_updated(db, stripe_account, data)
+
+        else:
+            logger.warning(f"Unhandled event type: {event_type}")
 
         # Mark event as processed
         stripe_event.status = StripeEventStatus.PROCESSED
@@ -253,16 +264,16 @@ async def handle_payment_failed(db: AsyncSession, account: StripeAccount, data: 
 
 
 async def handle_charge_succeeded(db: AsyncSession, account: StripeAccount, data: dict):
-    """Handle successful charge - updates risk metrics, revenue, and auto-resolves payment alerts."""
+    """Handle successful charge - updates revenue metrics, risk metrics, and auto-resolves payment alerts."""
     amount = data.get("amount", 0)
     timestamp = datetime.fromtimestamp(data.get("created", datetime.utcnow().timestamp()))
     customer_id = data.get("customer")
     payment_intent_id = data.get("payment_intent")
     invoice_id = data.get("invoice")
 
-    # Run sequentially to avoid concurrent DB operations on same session
-    await risk_service.update_risk_for_charge_succeeded(db, account, data)
+    # Record metrics FIRST so baseline checks can read today's revenue
     await metrics_service.record_successful_charge(db, account.id, amount, timestamp)
+    await risk_service.update_risk_for_charge_succeeded(db, account, data)
 
     # Auto-resolve payment failure alerts for this customer
     if customer_id:
@@ -310,6 +321,14 @@ async def handle_dispute_created(db: AsyncSession, account: StripeAccount, data:
     await alert_service.create_dispute_alert(db, account, data)
     await risk_service.update_risk_for_dispute_created(db, account, data)
     await metrics_service.record_dispute(db, account.id, timestamp)
+
+
+async def handle_dispute_updated(db: AsyncSession, account: StripeAccount, data: dict):
+    """Handle dispute update - track status transitions."""
+    dispute_status = data.get("status", "unknown")
+    logger.info(f"Dispute {data.get('id')} updated to status: {dispute_status}")
+    # Update risk metrics as dispute progresses
+    await risk_service.update_risk_for_dispute_closed(db, account, data)
 
 
 async def handle_dispute_closed(db: AsyncSession, account: StripeAccount, data: dict):
@@ -378,6 +397,21 @@ async def handle_payout_failed(db: AsyncSession, account: StripeAccount, data: d
     # Run sequentially to avoid concurrent DB operations on same session
     await alert_service.create_payout_failed_alert(db, account, data)
     await risk_service.update_risk_for_payout(db, account, data, success=False)
+
+
+async def handle_payout_canceled(db: AsyncSession, account: StripeAccount, data: dict):
+    """Handle canceled payout - updates payout health metrics."""
+    logger.info(f"Payout {data.get('id')} canceled, amount: {data.get('amount', 0)}")
+    await risk_service.update_risk_for_payout(db, account, data, success=False)
+
+
+async def handle_balance_available(db: AsyncSession, account: StripeAccount, data: dict):
+    """Handle balance available event - log available balance for monitoring."""
+    available = data.get("available", [])
+    for balance in available:
+        currency = balance.get("currency", "unknown")
+        amount = balance.get("amount", 0)
+        logger.info(f"Balance available: {amount} {currency} for account {account.stripe_account_id}")
 
 
 async def handle_account_updated(db: AsyncSession, account: StripeAccount, data: dict):
@@ -451,37 +485,33 @@ async def stripe_webhook(
             "note": f"Unknown account: {connected_account_id}",
         }
 
-    # Store the event
+    # Store the event as PENDING
     stripe_event = await store_event(db, stripe_account, event)
 
     # Check for duplicate (already processed)
     if stripe_event.status == StripeEventStatus.PROCESSED:
         return {"received": True, "type": event.type, "note": "Already processed"}
 
-    # Process the event
+    # Commit to DB first so the worker can find it
+    await db.commit()
+
+    # Enqueue for async processing via SQS worker
     try:
-        stripe_event.status = StripeEventStatus.PROCESSING
-        await db.flush()
-
-        await process_event(db, stripe_account, event, stripe_event)
-
-        return {
-            "received": True,
-            "type": event.type,
-            "event_id": event.id,
-            "status": "processed",
-        }
-
+        from app.services.sqs import send_event_for_processing
+        await send_event_for_processing({
+            "event_id": str(stripe_event.id),
+            "stripe_account_id": str(stripe_account.id),
+        })
     except Exception as e:
-        # Event processing failed but we still acknowledge receipt
-        # The event is stored and can be retried
-        return {
-            "received": True,
-            "type": event.type,
-            "event_id": event.id,
-            "status": "failed",
-            "error": str(e),
-        }
+        # SQS send failed — the sweep in the worker will catch it
+        logger.error(f"Failed to enqueue event {stripe_event.id} to SQS: {e}")
+
+    return {
+        "received": True,
+        "type": event.type,
+        "event_id": event.id,
+        "status": "queued",
+    }
 
 
 @router.post("/billing")
@@ -650,24 +680,25 @@ async def retry_webhook_event(
             detail="Associated Stripe account not found",
         )
 
-    # Reconstruct the event from stored payload
+    # Reset to PENDING and enqueue for worker processing
     try:
-        event = stripe.Event.construct_from(stripe_event.payload_json, stripe.api_key)
-
-        stripe_event.status = StripeEventStatus.PROCESSING
+        stripe_event.status = StripeEventStatus.PENDING
         stripe_event.error_message = None
-        await db.flush()
+        await db.commit()
 
-        await process_event(db, stripe_account, event, stripe_event)
+        from app.services.sqs import send_event_for_processing
+        await send_event_for_processing({
+            "event_id": str(stripe_event.id),
+            "stripe_account_id": str(stripe_account.id),
+        })
 
         return {
-            "message": "Event reprocessed successfully",
-            "status": stripe_event.status.value,
+            "message": "Event queued for reprocessing",
+            "status": "queued",
         }
 
     except Exception as e:
         return {
-            "message": "Event processing failed",
-            "status": stripe_event.status.value,
+            "message": "Failed to queue event for reprocessing",
             "error": str(e),
         }

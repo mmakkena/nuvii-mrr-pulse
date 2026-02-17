@@ -127,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
     localStorage.removeItem('workspace_id')
+    sessionStorage.removeItem('stripe_prompt_dismissed')
     setToken(null)
     setUser(null)
     setWorkspace(null)

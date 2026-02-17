@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -5,6 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db
+
+logger = logging.getLogger(__name__)
+
+if settings.otel_enabled:
+    try:
+        from app.telemetry import setup_telemetry
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        setup_telemetry(settings.otel_service_name, settings.otel_endpoint)
+    except Exception:
+        logger.exception("OpenTelemetry setup failed — continuing without tracing")
 
 
 @asynccontextmanager
@@ -25,6 +36,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+if settings.otel_enabled:
+    try:
+        FastAPIInstrumentor.instrument_app(app)
+    except Exception:
+        logger.exception("FastAPIInstrumentor setup failed — continuing without tracing")
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -41,7 +58,7 @@ async def health_check():
 
 
 # Import and include routers
-from app.api import auth, workspaces, stripe_connect, webhooks, alerts, rules, integrations, risk, billing, dashboard, admin
+from app.api import auth, workspaces, stripe_connect, webhooks, alerts, rules, integrations, risk, billing, dashboard, admin, metrics
 
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(workspaces.router, prefix="/api/workspaces", tags=["Workspaces"])
@@ -54,3 +71,4 @@ app.include_router(risk.router, prefix="/api/risk", tags=["Risk"])
 app.include_router(billing.router, prefix="/api/billing", tags=["Billing"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+app.include_router(metrics.router, prefix="/api/metrics", tags=["Metrics"])

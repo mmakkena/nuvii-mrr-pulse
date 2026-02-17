@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     sqs_events_queue_url: str = ""
     sqs_notifications_queue_url: str = ""
     sqs_risk_queue_url: str = ""
+    sqs_endpoint_url: str = ""  # Set to LocalStack URL for local dev; empty = real AWS
 
     # Auth
     jwt_secret: str = "change-me-in-production"
@@ -61,6 +62,14 @@ class Settings(BaseSettings):
     # Google OAuth
     google_client_id: str = ""
     google_client_secret: str = ""
+
+    # OpenTelemetry
+    otel_enabled: bool = False
+    otel_endpoint: str = "http://localhost:4317"
+    otel_service_name: str = "mrrpulse-backend"
+
+    # Alerting
+    velocity_min_baseline_charges: int = 5  # Minimum historical charges before velocity scoring activates
 
     # Frontend URL (for CORS and redirects)
     frontend_url: str = "http://localhost:3000"

@@ -413,3 +413,38 @@ class StripeEventResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# === Metrics / Analytics Schemas ===
+class MetricsDailyResponse(BaseModel):
+    date: str  # YYYY-MM-DD
+    revenue: float
+    refunds_count: int
+    refunds_amount: float
+    disputes_count: int
+    failures_count: int
+    cancellations_count: int
+    successful_charges_count: int
+    new_subscriptions_count: int
+    mrr: float
+
+
+class MetricsHistoryResponse(BaseModel):
+    days: int
+    data: List[MetricsDailyResponse]
+
+
+class BaselineMetricResponse(BaseModel):
+    metric_type: str
+    rolling_mean_7d: float
+    rolling_std_7d: float
+    sample_count_7d: int
+    rolling_mean_30d: float
+    rolling_std_30d: float
+    sample_count_30d: int
+    z_score_threshold: float
+    last_computed_at: Optional[datetime] = None
+
+
+class MetricsBaselinesResponse(BaseModel):
+    baselines: List[BaselineMetricResponse]

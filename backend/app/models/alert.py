@@ -21,6 +21,7 @@ class AlertType(str, Enum):
     PAYMENT_FAILED = "payment_failed"
     PAYOUT_FAILED = "payout_failed"
     VELOCITY_SPIKE = "velocity_spike"
+    PAYOUT_DELAYED = "payout_delayed"
     MILESTONE = "milestone"
 
 

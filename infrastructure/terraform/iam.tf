@@ -83,8 +83,34 @@ resource "aws_iam_role_policy" "ecs_task_sqs" {
         Resource = [
           aws_sqs_queue.events.arn,
           aws_sqs_queue.notifications.arn,
-          aws_sqs_queue.risk.arn
+          aws_sqs_queue.risk.arn,
+          aws_sqs_queue.events_dlq.arn,
+          aws_sqs_queue.notifications_dlq.arn,
+          aws_sqs_queue.risk_dlq.arn
         ]
+      }
+    ]
+  })
+}
+
+# Task role policy for X-Ray tracing
+resource "aws_iam_role_policy" "ecs_task_xray" {
+  name = "${local.name_prefix}-ecs-xray-policy"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+          "xray:GetSamplingRules",
+          "xray:GetSamplingTargets",
+          "xray:GetSamplingStatisticSummaries"
+        ]
+        Resource = "*"
       }
     ]
   })

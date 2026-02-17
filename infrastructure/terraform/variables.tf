@@ -62,6 +62,24 @@ variable "frontend_desired_count" {
   default     = 2
 }
 
+variable "worker_cpu" {
+  description = "CPU units for worker container"
+  type        = number
+  default     = 256
+}
+
+variable "worker_memory" {
+  description = "Memory for worker container in MB"
+  type        = number
+  default     = 512
+}
+
+variable "worker_desired_count" {
+  description = "Desired number of worker tasks"
+  type        = number
+  default     = 1
+}
+
 # RDS Configuration
 variable "db_instance_class" {
   description = "RDS instance class"
@@ -157,6 +175,31 @@ variable "twilio_phone_number" {
   description = "Twilio phone number"
   type        = string
   default     = ""
+}
+
+variable "from_email" {
+  description = "From email address for sending emails"
+  type        = string
+  default     = "alerts@mrrpulse.com"
+}
+
+variable "stripe_publishable_key" {
+  description = "Stripe publishable key for frontend"
+  type        = string
+  default     = ""
+}
+
+# Observability
+variable "otel_enabled" {
+  description = "Enable OpenTelemetry tracing via ADOT sidecar"
+  type        = bool
+  default     = true
+}
+
+variable "velocity_min_baseline_charges" {
+  description = "Minimum historical charges (older than 1h) required before velocity spike alerting activates. Set to 1 for demos/new accounts, 5+ for production."
+  type        = number
+  default     = 5
 }
 
 # Cost Optimization Options

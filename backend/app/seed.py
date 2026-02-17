@@ -3,6 +3,7 @@ Database seed script for MRRPulse.
 Populates the database with demo data for development and testing.
 """
 import asyncio
+import random
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -16,6 +17,8 @@ from app.models.stripe_account import StripeAccount, StripeAccountStatus
 from app.models.notification import NotificationChannel, ChannelType
 from app.models.alert import Alert, AlertRule, AlertType, AlertSeverity, AlertStatus
 from app.models.risk import RiskState, RiskLevel, PayoutHealth
+from app.models.metrics import MetricsDaily
+from app.models.baseline import MetricsBaseline, MetricType
 
 
 def hash_password(password: str) -> str:
@@ -299,10 +302,64 @@ async def seed_database():
             refund_burst_score=0,
             payout_health=PayoutHealth.HEALTHY,
             last_payout_at=datetime.utcnow() - timedelta(hours=24),
+            expected_payout_interval_hours=Decimal("48.0"),
             overall_status=RiskLevel.NORMAL,
         )
         session.add(risk_state)
         print("Created risk state")
+
+        # Seed 35 days of MetricsDaily data with realistic revenue variance
+        random.seed(42)  # Reproducible
+        base_revenue = 4500.0
+        std_dev = 500.0
+        for day_offset in range(35, 0, -1):
+            day_start = (datetime.utcnow() - timedelta(days=day_offset)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            daily_revenue = max(0, random.gauss(base_revenue, std_dev))
+            daily_charges = max(1, int(random.gauss(45, 8)))
+            daily_refunds = max(0, int(random.gauss(2, 1.5)))
+            daily_disputes = 1 if random.random() < 0.1 else 0
+
+            daily = MetricsDaily(
+                id=uuid.uuid4(),
+                stripe_account_id=stripe_account_id,
+                period_start=day_start,
+                revenue=Decimal(str(round(daily_revenue, 2))),
+                refunds_count=daily_refunds,
+                refunds_amount=Decimal(str(round(daily_refunds * 45.0, 2))),
+                disputes_count=daily_disputes,
+                failures_count=max(0, int(random.gauss(1, 1))),
+                cancellations_count=1 if random.random() < 0.15 else 0,
+                successful_charges_count=daily_charges,
+                new_subscriptions_count=max(0, int(random.gauss(2, 1))),
+                mrr=Decimal("45000.00"),
+            )
+            session.add(daily)
+        print("Created 35 days of MetricsDaily data")
+
+        # Seed initial MetricsBaseline records
+        baselines_data = [
+            (MetricType.REVENUE, base_revenue, std_dev),
+            (MetricType.DISPUTES_COUNT, 0.1, 0.3),
+            (MetricType.REFUNDS_COUNT, 2.0, 1.5),
+        ]
+        for metric_type, mean_val, std_val in baselines_data:
+            baseline = MetricsBaseline(
+                id=uuid.uuid4(),
+                stripe_account_id=stripe_account_id,
+                metric_type=metric_type,
+                rolling_mean_7d=Decimal(str(round(mean_val, 4))),
+                rolling_std_7d=Decimal(str(round(std_val, 4))),
+                sample_count_7d=7,
+                rolling_mean_30d=Decimal(str(round(mean_val, 4))),
+                rolling_std_30d=Decimal(str(round(std_val, 4))),
+                sample_count_30d=30,
+                z_score_threshold=Decimal("2.0"),
+                last_computed_at=datetime.utcnow(),
+            )
+            session.add(baseline)
+        print("Created MetricsBaseline records")
 
         await session.commit()
         print("Database seeded successfully!")

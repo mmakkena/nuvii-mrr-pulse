@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'use
-'
+import { useEffect, useState } from 'react'
+
+export const dynamic = 'force-dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, CheckCircle, XCircle } from 'lucide-react'
@@ -53,9 +54,9 @@ export default function StripeCallbackPage() {
         setStatus('success')
         setMessage(`Successfully connected ${data.account?.business_name || 'Stripe account'}!`)
 
-        // Redirect to dashboard after 2 seconds
+        // Redirect to rules page (step 2: configure alert rules)
         setTimeout(() => {
-          router.push('/dashboard')
+          router.push('/rules')
         }, 2000)
       } catch (err) {
         setStatus('error')
@@ -84,7 +85,7 @@ export default function StripeCallbackPage() {
                 <CheckCircle className="w-12 h-12 text-green-500" />
                 <h2 className="text-xl font-semibold text-slate-900">Success!</h2>
                 <p className="text-slate-600">{message}</p>
-                <p className="text-sm text-slate-500">Redirecting to dashboard...</p>
+                <p className="text-sm text-slate-500">Redirecting to configure alert rules...</p>
               </>
             )}
 

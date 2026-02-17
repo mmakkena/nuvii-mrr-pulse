@@ -45,6 +45,7 @@ services:
       - SQS_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/mrrpulse-events
       - SQS_NOTIFICATIONS_QUEUE_URL=http://localstack:4566/000000000000/mrrpulse-notifications
       - SQS_RISK_QUEUE_URL=http://localstack:4566/000000000000/mrrpulse-risk
+      - SQS_ENDPOINT_URL=http://localstack:4566
       - FRONTEND_URL=http://localhost:3000
       - API_URL=http://localhost:8000
       - DEBUG=true
@@ -72,6 +73,45 @@ services:
     volumes:
       - ./backend:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mrrpulse-worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/mrrpulse
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - SQS_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/mrrpulse-events
+      - SQS_NOTIFICATIONS_QUEUE_URL=http://localstack:4566/000000000000/mrrpulse-notifications
+      - SQS_RISK_QUEUE_URL=http://localstack:4566/000000000000/mrrpulse-risk
+      - SQS_ENDPOINT_URL=http://localstack:4566
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SIGNING_SECRET=${STRIPE_WEBHOOK_SIGNING_SECRET:-}
+      - FERNET_KEY=${FERNET_KEY:-}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
+      - FROM_EMAIL=${FROM_EMAIL:-alerts@mrrpulse.com}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+    command: python -m worker
+    healthcheck:
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(cat /tmp/worker_health 2>/dev/null || echo 0) )) -lt 60"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   frontend:
     build:

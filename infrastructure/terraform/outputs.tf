@@ -64,6 +64,11 @@ output "frontend_service_name" {
   value       = aws_ecs_service.frontend.name
 }
 
+output "worker_service_name" {
+  description = "Name of the worker ECS service"
+  value       = aws_ecs_service.worker.name
+}
+
 # RDS
 output "rds_endpoint" {
   description = "Endpoint of the RDS instance"
@@ -97,6 +102,23 @@ output "secrets_arn" {
   value       = var.use_secrets_manager ? aws_secretsmanager_secret.app_secrets[0].arn : ""
 }
 
+# SSM Bastion
+output "ssm_bastion_instance_id" {
+  description = "Instance ID of the SSM bastion (use for port forwarding)"
+  value       = aws_instance.ssm_bastion.id
+}
+
+output "ssm_db_tunnel_command" {
+  description = "Command to tunnel RDS to localhost:5432 via SSM"
+  value       = <<-EOT
+    aws ssm start-session \
+      --profile mrr-pulse \
+      --target ${aws_instance.ssm_bastion.id} \
+      --document-name AWS-StartPortForwardingSessionToRemoteHost \
+      --parameters '{"host":["${aws_db_instance.main.address}"],"portNumber":["5432"],"localPortNumber":["5432"]}'
+  EOT
+}
+
 # Deployment Commands
 output "deployment_commands" {
   description = "Commands to deploy the application"
@@ -117,8 +139,9 @@ output "deployment_commands" {
     # Update ECS services
     aws ecs update-service --cluster ${aws_ecs_cluster.main.name} --service ${aws_ecs_service.backend.name} --force-new-deployment
     aws ecs update-service --cluster ${aws_ecs_cluster.main.name} --service ${aws_ecs_service.frontend.name} --force-new-deployment
+    aws ecs update-service --cluster ${aws_ecs_cluster.main.name} --service ${aws_ecs_service.worker.name} --force-new-deployment
 
     # Run database migrations
-    aws ecs run-task --cluster ${aws_ecs_cluster.main.name} --task-definition ${aws_ecs_task_definition.backend.family} --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[${join(",", aws_subnet.private[*].id)}],securityGroups=[${aws_security_group.backend.id}]}" --overrides '{"containerOverrides":[{"name":"backend","command":["alembic","upgrade","head"]}]}'
+    aws ecs run-task --cluster ${aws_ecs_cluster.main.name} --task-definition ${aws_ecs_task_definition.backend.family} --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[${join(",", var.use_private_subnets ? aws_subnet.private[*].id : aws_subnet.public[*].id)}],securityGroups=[${aws_security_group.backend.id}],assignPublicIp=${var.use_private_subnets ? "DISABLED" : "ENABLED"}}" --overrides '{"containerOverrides":[{"name":"backend","command":["alembic","upgrade","head"]}]}'
   EOT
 }
