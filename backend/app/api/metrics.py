@@ -16,7 +16,7 @@ from app.schemas import (
     MetricsBaselinesResponse,
 )
 from app.utils.auth import get_current_user
-from app.services import risk_service, baseline_service
+from app.services import risk_service, baseline_service, metrics_service
 
 router = APIRouter()
 
@@ -206,11 +206,20 @@ async def recalculate_metrics(
 
     results = []
     for account in stripe_accounts:
+        # Step 1: rebuild metrics_daily counters from raw stripe_events
+        corrected_days = await metrics_service.recalculate_daily_metrics_from_events(
+            db, account.id
+        )
+
+        # Step 2: recompute risk_state from stripe_events
         risk_state = await risk_service.recalculate_all_metrics(db, account)
+
+        # Step 3: recompute baselines from the now-corrected metrics_daily
         await baseline_service.recompute_all_baselines(db, account.id)
 
         results.append({
             "stripe_account_id": account.stripe_account_id,
+            "days_corrected": len(corrected_days),
             "dispute_rate_30d": round(float(risk_state.dispute_rate_30d) * 100, 2),
             "disputes_count_30d": risk_state.disputes_count_30d,
             "successful_charges_30d": risk_state.successful_charges_30d,

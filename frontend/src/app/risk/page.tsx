@@ -20,6 +20,7 @@ import {
 import { formatRelativeTime } from '@/lib/utils'
 import { riskApi, RiskStatus, RiskEvent } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import Link from 'next/link'
 
 function getRiskStatusConfig(status: string) {
   switch (status) {
@@ -133,6 +134,14 @@ export default function RiskPage() {
       />
 
       <div className="p-6 space-y-6">
+        <div className="pb-2">
+          <Link href="/risk/disputes">
+            <Button variant="outline" size="sm">
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              View All Disputes
+            </Button>
+          </Link>
+        </div>
         {/* Overall Status Banner */}
         <Card className={`border-l-4 ${overallStatus.borderColor}`}>
           <CardContent className="py-6">

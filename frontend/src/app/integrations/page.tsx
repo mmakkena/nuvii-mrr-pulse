@@ -258,7 +258,17 @@ export default function IntegrationsPage() {
                       <TestTube className="w-4 h-4 mr-1" />
                       {testingIntegration === integration.id ? 'Sending...' : 'Test'}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => showInfo('Configure integration coming soon')}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (integration.type === 'email') {
+                          setEmailModalOpen(true)
+                        } else {
+                          showInfo('Configure integration coming soon')
+                        }
+                      }}
+                    >
                       <Settings className="w-4 h-4 mr-1" />
                       Configure
                     </Button>

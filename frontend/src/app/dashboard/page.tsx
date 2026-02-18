@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { DashboardLayout } from '@/components/layout'
 import { Header } from '@/components/layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,6 +14,7 @@ import {
   ArrowDownRight,
   Bell,
   Loader2,
+  RefreshCw,
 } from 'lucide-react'
 import { formatCurrency, formatRelativeTime } from '@/lib/utils'
 import { alertsApi, riskApi, dashboardApi, stripeConnectApi, Alert, RiskStatus, DashboardStats } from '@/lib/api'
@@ -22,6 +23,8 @@ import { useAlertSnackbar } from '@/components/ui/alert-snackbar'
 import { StripeConnectPrompt } from '@/components/ui/stripe-connect-prompt'
 import { StripeConnectionBanner } from '@/components/ui/stripe-connection-banner'
 import Link from 'next/link'
+
+const REFRESH_INTERVAL_MS = 60_000 // 60 seconds
 
 function getSeverityColor(severity: string) {
   switch (severity) {
@@ -58,6 +61,10 @@ function getRiskBorderColor(status: string) {
   }
 }
 
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 export default function DashboardPage() {
   const { isLoading: authLoading, token, workspace } = useAuth()
   const { showError, showSuccess, AlertSnackbar } = useAlertSnackbar()
@@ -65,6 +72,8 @@ export default function DashboardPage() {
   const [riskStatus, setRiskStatus] = useState<RiskStatus | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showStripePrompt, setShowStripePrompt] = useState(false)
   const [hasStripeAccount, setHasStripeAccount] = useState<boolean | null>(null)
@@ -72,54 +81,64 @@ export default function DashboardPage() {
 
   const workspaceId = workspace?.id
 
+  // Fetch only the metrics that need periodic refresh
+  const fetchMetrics = useCallback(async () => {
+    if (!token || !workspaceId) return
+    try {
+      setRefreshing(true)
+      const [alertsRes, riskRes, statsRes] = await Promise.all([
+        alertsApi.list({ page_size: 5 }),
+        riskApi.getStatus(),
+        dashboardApi.getStats(),
+      ])
+      setAlerts(alertsRes.alerts)
+      setRiskStatus(riskRes)
+      setStats(statsRes)
+      setLastUpdated(new Date())
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data')
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [token, workspaceId])
+
+  // Initial load: fetch metrics + one-time Stripe account check
   useEffect(() => {
-    // Don't fetch if still checking auth or not authenticated
     if (authLoading || !token || !workspaceId) return
 
-    async function fetchData() {
+    async function init() {
+      await fetchMetrics()
+
       try {
-        setLoading(true)
-
-        // Fetch dashboard data
-        const [alertsRes, riskRes, statsRes] = await Promise.all([
-          alertsApi.list({ page_size: 5 }),
-          riskApi.getStatus(),
-          dashboardApi.getStats(),
-        ])
-
-        setAlerts(alertsRes.alerts)
-        setRiskStatus(riskRes)
-        setStats(statsRes)
-
-        // Check Stripe connection if workspace is available
-        if (workspaceId) {
-          try {
-            const stripeAccounts = await stripeConnectApi.listAccounts(workspaceId)
-            const hasAccount = stripeAccounts.length > 0
-            setHasStripeAccount(hasAccount)
-            if (hasAccount) {
-              setStripeBusinessName(stripeAccounts[0].business_name)
-            }
-
-            if (!hasAccount && !sessionStorage.getItem('stripe_prompt_dismissed')) {
-              setShowStripePrompt(true)
-            }
-          } catch (err) {
-            console.error('Failed to check Stripe accounts:', err)
-            setHasStripeAccount(false)
-            if (!sessionStorage.getItem('stripe_prompt_dismissed')) {
-              setShowStripePrompt(true)
-            }
-          }
+        const stripeAccounts = await stripeConnectApi.listAccounts(workspaceId!)
+        const hasAccount = stripeAccounts.length > 0
+        setHasStripeAccount(hasAccount)
+        if (hasAccount) {
+          setStripeBusinessName(stripeAccounts[0].business_name)
+        }
+        if (!hasAccount && !sessionStorage.getItem('stripe_prompt_dismissed')) {
+          setShowStripePrompt(true)
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data')
-      } finally {
-        setLoading(false)
+        console.error('Failed to check Stripe accounts:', err)
+        setHasStripeAccount(false)
+        if (!sessionStorage.getItem('stripe_prompt_dismissed')) {
+          setShowStripePrompt(true)
+        }
       }
     }
-    fetchData()
-  }, [authLoading, token, workspaceId])
+
+    init()
+  }, [authLoading, token, workspaceId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-refresh interval — restarts if token/workspace changes
+  useEffect(() => {
+    if (!token || !workspaceId) return
+    const timer = setInterval(fetchMetrics, REFRESH_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [token, workspaceId, fetchMetrics])
 
   // Show loading while checking auth
   if (authLoading) {
@@ -137,6 +156,10 @@ export default function DashboardPage() {
     } catch (err) {
       showError('Failed to send test alert')
     }
+  }
+
+  const handleManualRefresh = () => {
+    fetchMetrics()
   }
 
   if (loading) {
@@ -158,7 +181,7 @@ export default function DashboardPage() {
           <Card className="border-red-200 bg-red-50">
             <CardContent className="py-4">
               <p className="text-red-800">Error loading dashboard: {error}</p>
-              <Button onClick={() => window.location.reload()} className="mt-4">
+              <Button onClick={handleManualRefresh} className="mt-4">
                 Retry
               </Button>
             </CardContent>
@@ -208,6 +231,24 @@ export default function DashboardPage() {
       <Header title="Dashboard" description="Overview of your Stripe metrics and alerts" />
 
       <div className="p-6 space-y-6">
+        {/* Refresh bar */}
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-500">
+            {lastUpdated
+              ? `Last updated at ${formatTime(lastUpdated)} · Auto-refreshes every 60s`
+              : 'Loading…'}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
+        </div>
+
         {/* Stripe Connection Status */}
         {hasStripeAccount !== null && workspaceId && (
           <StripeConnectionBanner

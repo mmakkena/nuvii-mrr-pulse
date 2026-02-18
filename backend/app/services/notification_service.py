@@ -95,7 +95,7 @@ def build_alert_email_html(alert: Alert) -> str:
         </a>
         """
 
-    dashboard_url = f"{settings.frontend_url}/dashboard/alerts"
+    dashboard_url = f"{settings.frontend_url}/alerts"
     buttons_html += f"""
     <a href="{dashboard_url}"
        style="display: inline-block; background-color: {colors['accent']}; color: white;
@@ -209,7 +209,7 @@ MRRPulse Alert - {alert.severity.value.upper()}
     if stripe_url:
         text += f"\n\nView in Stripe: {stripe_url}"
 
-    text += f"\nView in Dashboard: {settings.frontend_url}/dashboard/alerts"
+    text += f"\nView in Dashboard: {settings.frontend_url}/alerts"
     text += f"\n\nAlert ID: {alert.id}"
     text += f"\nTime: {alert.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
     text += f"\n\n---\nManage notifications: {settings.frontend_url}/integrations"
@@ -382,79 +382,178 @@ async def _send_via_ses(
         return False, str(e)
 
 
+
+async def send_slack_notification(
+    alert: Alert,
+    channel: NotificationChannel,
+    delivery: AlertDelivery
+) -> tuple[bool, Optional[str]]:
+    """Send alert notification via Slack webhook."""
+    import httpx
+    config = channel.config_json or {}
+    webhook_url = config.get("webhook_url")
+    slack_channel = config.get("channel", "")
+
+    if not webhook_url:
+        return False, "No webhook URL configured"
+
+    emoji = get_alert_emoji(alert.alert_type)
+    severity = alert.severity.value.upper()
+
+    color_map = {
+        "CRITICAL": "#dc2626",
+        "WARNING": "#f59e0b",
+        "INFO": "#3b82f6",
+    }
+    color = color_map.get(severity, "#3b82f6")
+
+    metadata = alert.metadata_json or {}
+    fields = []
+    if metadata.get("customer_email"):
+        fields.append({"title": "Customer", "value": metadata["customer_email"], "short": True})
+    if metadata.get("amount"):
+        fields.append({"title": "Amount", "value": f"${int(metadata['amount'])/100:,.2f}", "short": True})
+
+    payload = {
+        "attachments": [{
+            "color": color,
+            "fallback": f"{emoji} [{severity}] {alert.title}",
+            "title": f"{emoji} {alert.title}",
+            "text": alert.body,
+            "fields": fields,
+            "footer": "MRRPulse",
+            "ts": int(alert.created_at.timestamp()),
+        }]
+    }
+    if slack_channel:
+        payload["channel"] = slack_channel
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(webhook_url, json=payload)
+        if response.status_code == 200 and response.text == "ok":
+            logger.info(f"Alert {alert.id} sent to Slack")
+            return True, None
+        return False, f"Slack returned {response.status_code}: {response.text}"
+    except Exception as e:
+        logger.error(f"Failed to send Slack notification: {e}")
+        return False, str(e)
+
+
+async def send_sms_notification(
+    alert: Alert,
+    channel: NotificationChannel,
+    delivery: AlertDelivery
+) -> tuple[bool, Optional[str]]:
+    """Send alert notification via SMS using Twilio."""
+    from twilio.rest import Client as TwilioClient
+    from app.config import settings
+
+    config = channel.config_json or {}
+    to_phone = config.get("phone") or config.get("phone_number")
+
+    if not to_phone:
+        return False, "No phone number configured"
+
+    if not settings.twilio_account_sid or not settings.twilio_auth_token:
+        if settings.debug:
+            logger.info(f"[DEBUG] Would send SMS to {to_phone}: {alert.title}")
+            return True, None
+        return False, "Twilio credentials not configured"
+
+    emoji = get_alert_emoji(alert.alert_type)
+    severity = alert.severity.value.upper()
+    body = f"MRRPulse {emoji} [{severity}] {alert.title}\n{alert.body[:120]}"
+
+    try:
+        client = TwilioClient(settings.twilio_account_sid, settings.twilio_auth_token)
+        message = client.messages.create(
+            body=body,
+            from_=settings.twilio_phone_number,
+            to=to_phone,
+        )
+        logger.info(f"SMS sent to {to_phone}: SID={message.sid}")
+        return True, None
+    except Exception as e:
+        logger.error(f"Failed to send SMS: {e}")
+        return False, str(e)
+
+
 async def send_test_notification(channel: NotificationChannel) -> tuple[bool, str]:
     """Send a test notification to verify channel configuration."""
     if channel.channel_type == ChannelType.EMAIL:
         config = channel.config_json or {}
         emails = config.get("emails", [])
-
         if not emails:
             return False, "No email addresses configured"
-
-        # Build test email
         subject = "MRRPulse Test Alert"
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                     background-color: #f4f4f5; margin: 0; padding: 20px;">
-            <div style="max-width: 600px; margin: 0 auto; background-color: white; border-radius: 12px;
-                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); overflow: hidden;">
-
-                <div style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); padding: 24px; text-align: center;">
-                    <h1 style="color: white; margin: 0; font-size: 24px; font-weight: 700;">MRRPulse</h1>
-                </div>
-
-                <div style="padding: 32px 24px; text-align: center;">
-                    <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
-                    <h2 style="color: #1f2937; margin: 0 0 12px 0; font-size: 22px; font-weight: 600;">
-                        Test Alert Successful!
-                    </h2>
-                    <p style="color: #6b7280; margin: 0; font-size: 15px; line-height: 1.6;">
-                        Your email notification channel is configured correctly and ready to receive alerts.
-                    </p>
-                    <div style="margin-top: 24px;">
-                        <a href="{settings.frontend_url}/integrations"
-                           style="display: inline-block; background-color: #3b82f6; color: white;
-                                  padding: 12px 24px; text-decoration: none; border-radius: 6px;
-                                  font-weight: 600; font-size: 14px;">
-                            Back to Integrations
-                        </a>
-                    </div>
-                </div>
-
-                <div style="background-color: #f9fafb; padding: 20px 24px; border-top: 1px solid #e5e7eb;">
-                    <p style="color: #9ca3af; margin: 0; font-size: 12px; text-align: center;">
-                        &copy; 2024 MRRPulse. All rights reserved.
-                    </p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
+        html_content = """<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f4f4f5;padding:20px;">
+<div style="max-width:600px;margin:0 auto;background:white;border-radius:12px;overflow:hidden;">
+<div style="background:linear-gradient(135deg,#3b82f6,#1d4ed8);padding:24px;text-align:center;">
+<h1 style="color:white;margin:0;">MRRPulse</h1></div>
+<div style="padding:32px 24px;text-align:center;">
+<div style="font-size:48px;">&#x2705;</div>
+<h2 style="color:#1f2937;">Test Alert Successful!</h2>
+<p style="color:#6b7280;">Your email notification channel is configured correctly.</p>
+</div></div></body></html>"""
         text_content = "MRRPulse Test Alert - Your email notification channel is configured correctly!"
-
-        # Use same sending logic
         primary_provider = config.get("primary_provider", "sendgrid")
         providers_config = config.get("providers", {})
-
         success, error = await _send_via_provider(
-            primary_provider,
-            providers_config.get(primary_provider, {}),
-            emails,
-            subject,
-            html_content,
-            text_content
+            primary_provider, providers_config.get(primary_provider, {}),
+            emails, subject, html_content, text_content
         )
-
         if success:
             return True, f"Test email sent successfully to {', '.join(emails)}"
-        else:
-            return False, f"Failed to send test email: {error}"
+        return False, f"Failed to send test email: {error}"
 
-    # TODO: Add support for other channel types (SMS, Slack, etc.)
+    if channel.channel_type == ChannelType.SLACK:
+        import httpx
+        config = channel.config_json or {}
+        webhook_url = config.get("webhook_url")
+        if not webhook_url:
+            return False, "No webhook URL configured"
+        payload = {
+            "attachments": [{
+                "color": "#3b82f6",
+                "title": "\u2705 MRRPulse Test Alert",
+                "text": "Your Slack notification channel is configured correctly and ready to receive alerts.",
+                "footer": "MRRPulse",
+            }]
+        }
+        slack_channel = config.get("channel")
+        if slack_channel:
+            payload["channel"] = slack_channel
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(webhook_url, json=payload)
+            if response.status_code == 200 and response.text == "ok":
+                return True, "Test message sent to Slack successfully"
+            return False, f"Slack returned {response.status_code}: {response.text}"
+        except Exception as e:
+            return False, f"Failed to send Slack test: {e}"
+
+    if channel.channel_type == ChannelType.SMS:
+        from twilio.rest import Client as TwilioClient
+        from app.config import settings
+        config = channel.config_json or {}
+        to_phone = config.get("phone") or config.get("phone_number")
+        if not to_phone:
+            return False, "No phone number configured"
+        if not settings.twilio_account_sid or not settings.twilio_auth_token:
+            if settings.debug:
+                logger.info(f"[DEBUG] Would send test SMS to {to_phone}")
+                return True, f"[DEBUG] Test SMS would be sent to {to_phone}"
+            return False, "Twilio credentials not configured"
+        try:
+            client = TwilioClient(settings.twilio_account_sid, settings.twilio_auth_token)
+            message = client.messages.create(
+                body="\u2705 MRRPulse Test Alert - Your SMS notification channel is configured correctly!",
+                from_=settings.twilio_phone_number,
+                to=to_phone,
+            )
+            return True, f"Test SMS sent to {to_phone} (SID: {message.sid})"
+        except Exception as e:
+            return False, f"Failed to send test SMS: {e}"
+
     return False, f"Test notifications not yet supported for {channel.channel_type.value}"

@@ -5,7 +5,8 @@ import { DashboardLayout } from '@/components/layout'
 import { Header } from '@/components/layout'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Loader2, Activity } from 'lucide-react'
+import { Loader2, Activity, CreditCard } from 'lucide-react'
+import Link from 'next/link'
 import { useAuth } from '@/lib/auth'
 import {
   metricsApi,
@@ -210,6 +211,14 @@ export default function AnalyticsPage() {
       <Header title="Analytics" description="Metrics visualization and anomaly detection" />
 
       <div className="p-6 space-y-6">
+        <div className="pb-2">
+          <Link href="/analytics/transactions">
+            <Button variant="outline" size="sm">
+              <CreditCard className="w-4 h-4 mr-2" />
+              View All Transactions
+            </Button>
+          </Link>
+        </div>
         {/* Date Range Selector */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-slate-500 mr-2">Date Range:</span>

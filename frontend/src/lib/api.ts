@@ -180,6 +180,49 @@ export interface Integration {
 }
 
 // Dashboard Stats
+export interface Charge {
+  id: string
+  charge_id: string | null
+  amount: number
+  currency: string
+  status: string
+  customer_email: string | null
+  customer_name: string | null
+  customer_id: string | null
+  description: string | null
+  payment_method_type: string | null
+  card_brand: string | null
+  card_last4: string | null
+  created_at: string | null
+  stripe_dashboard_url: string
+}
+
+export interface ChargesResponse {
+  total: number
+  days: number
+  charges: Charge[]
+}
+
+export interface Dispute {
+  id: string
+  dispute_id: string | null
+  charge_id: string | null
+  amount: number
+  currency: string
+  reason: string
+  status: string
+  customer_id: string | null
+  evidence_due_by: number | null
+  created_at: string | null
+  stripe_dashboard_url: string
+}
+
+export interface DisputesResponse {
+  total: number
+  days: number
+  disputes: Dispute[]
+}
+
 export interface DashboardStats {
   monthly_revenue: number
   monthly_revenue_change: number
@@ -619,6 +662,14 @@ export const adminApi = {
     fetchApi<RoleChangeResponse>(`/api/admin/users/${userId}/roles/${role}`, {
       method: 'DELETE',
     }),
+}
+
+
+export const transactionsApi = {
+  listCharges: (days = 30, limit = 50, offset = 0) =>
+    fetchApi<ChargesResponse>(`/api/transactions/charges?days=${days}&limit=${limit}&offset=${offset}`),
+  listDisputes: (days = 90, limit = 50, offset = 0) =>
+    fetchApi<DisputesResponse>(`/api/transactions/disputes?days=${days}&limit=${limit}&offset=${offset}`),
 }
 
 export { ApiError }

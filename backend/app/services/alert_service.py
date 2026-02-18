@@ -59,7 +59,11 @@ async def create_alert(
 
 async def deliver_alert_notifications(db: AsyncSession, alert: Alert) -> None:
     """Deliver alert to all configured notification channels."""
-    from app.services.notification_service import send_email_notification
+    from app.services.notification_service import (
+        send_email_notification,
+        send_slack_notification,
+        send_sms_notification,
+    )
 
     # Get enabled notification channels for this workspace
     result = await db.execute(
@@ -106,7 +110,10 @@ async def deliver_alert_notifications(db: AsyncSession, alert: Alert) -> None:
         try:
             if channel.channel_type == ChannelType.EMAIL:
                 success, error_message = await send_email_notification(alert, channel, delivery)
-            # TODO: Add support for other channel types (SMS, Slack, Discord)
+            elif channel.channel_type == ChannelType.SLACK:
+                success, error_message = await send_slack_notification(alert, channel, delivery)
+            elif channel.channel_type == ChannelType.SMS:
+                success, error_message = await send_sms_notification(alert, channel, delivery)
             else:
                 error_message = f"Channel type {channel.channel_type.value} not yet supported"
                 logger.warning(error_message)

@@ -22,7 +22,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.metrics import MetricsDaily, MetricsHourly
-from app.models import StripeAccount
+from app.models import StripeAccount, StripeEvent
 
 logger = logging.getLogger(__name__)
 
@@ -354,3 +354,102 @@ def calculate_mrr_from_subscription(subscription_data: dict) -> int:
         total_amount += int(monthly_amount)
 
     return total_amount
+
+
+async def recalculate_daily_metrics_from_events(
+    db: AsyncSession,
+    stripe_account_id: UUID,
+) -> list[MetricsDaily]:
+    """
+    Rebuild metrics_daily counters from raw stripe_events.
+
+    Fixes incremental counters that were double-counted due to the
+    payment_intent.succeeded fallback race condition. Recomputes:
+      - successful_charges_count  (from charge.succeeded)
+      - failures_count            (from charge.failed)
+      - refunds_count             (from charge.refunded)
+      - disputes_count            (from charge.dispute.created)
+      - cancellations_count       (from customer.subscription.deleted)
+      - revenue                   (sum of charge.succeeded amounts)
+      - refunds_amount            (sum of charge.refunded amounts)
+
+    MRR and new_subscriptions_count are left unchanged — those are
+    derived from subscription events whose amounts cannot be reliably
+    re-summed from event payloads without re-parsing every payload.
+    """
+    # Fetch all relevant events for this account
+    result = await db.execute(
+        select(StripeEvent)
+        .where(StripeEvent.stripe_account_id == stripe_account_id)
+        .where(StripeEvent.event_type.in_([
+            "charge.succeeded",
+            "charge.failed",
+            "charge.refunded",
+            "charge.dispute.created",
+            "customer.subscription.deleted",
+        ]))
+        .where(StripeEvent.status == "PROCESSED")
+        .order_by(StripeEvent.stripe_created_at)
+    )
+    events = result.scalars().all()
+
+    # Aggregate per calendar day using stripe_created_at (event time, not ingestion time)
+    from collections import defaultdict
+    buckets: dict[datetime, dict] = defaultdict(lambda: {
+        "successful_charges_count": 0,
+        "failures_count": 0,
+        "refunds_count": 0,
+        "disputes_count": 0,
+        "cancellations_count": 0,
+        "revenue": Decimal("0"),
+        "refunds_amount": Decimal("0"),
+    })
+
+    for event in events:
+        event_dt = event.stripe_created_at or event.created_at
+        day = event_dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+        payload = event.payload_json or {}
+        data = payload.get("data", {}).get("object", {})
+        amount = Decimal(str(data.get("amount", 0))) / 100
+
+        if event.event_type == "charge.succeeded":
+            buckets[day]["successful_charges_count"] += 1
+            buckets[day]["revenue"] += amount
+        elif event.event_type == "charge.failed":
+            buckets[day]["failures_count"] += 1
+        elif event.event_type == "charge.refunded":
+            refund_amount = Decimal(str(data.get("amount_refunded", 0))) / 100
+            buckets[day]["refunds_count"] += 1
+            buckets[day]["refunds_amount"] += refund_amount
+        elif event.event_type == "charge.dispute.created":
+            buckets[day]["disputes_count"] += 1
+        elif event.event_type == "customer.subscription.deleted":
+            buckets[day]["cancellations_count"] += 1
+
+    # Apply corrections to each existing metrics_daily row
+    updated = []
+    for day, counts in buckets.items():
+        result = await db.execute(
+            select(MetricsDaily)
+            .where(MetricsDaily.stripe_account_id == stripe_account_id)
+            .where(MetricsDaily.period_start == day)
+        )
+        daily = result.scalar_one_or_none()
+        if daily is None:
+            continue
+
+        daily.successful_charges_count = counts["successful_charges_count"]
+        daily.failures_count = counts["failures_count"]
+        daily.refunds_count = counts["refunds_count"]
+        daily.disputes_count = counts["disputes_count"]
+        daily.cancellations_count = counts["cancellations_count"]
+        daily.revenue = counts["revenue"]
+        daily.refunds_amount = counts["refunds_amount"]
+        updated.append(daily)
+
+    await db.flush()
+    logger.info(
+        f"Recalculated metrics_daily for {len(updated)} day(s) "
+        f"for account {stripe_account_id}"
+    )
+    return updated
