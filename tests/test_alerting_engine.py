@@ -31,9 +31,9 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, "backend"))
 sys.path.insert(0, PROJECT_ROOT)
 
 # Config
-API_BASE = "http://localhost:8000"
+API_BASE = os.getenv("TEST_API_BASE", "http://localhost:8000")
 WEBHOOK_URL = f"{API_BASE}/api/webhooks/stripe"
-WEBHOOK_SECRET = "whsec_gesvobrobT6FgTZVs2M9vGI0Xe2Nhp9a"
+WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SIGNING_SECRET", "whsec_test_only_not_a_real_secret")
 CONNECTED_ACCOUNT_ID = "acct_demo123456"
 
 RESULTS = []
